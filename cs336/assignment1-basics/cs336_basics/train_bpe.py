@@ -5,28 +5,6 @@ from pretokenization_example import find_chunk_boundaries
 
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 
-
-def split_by_endoftext(f):
-    """
-    Split the input text by the "<|endoftext|>" and return an iterator of strings
-    """
-    until_eot = ""
-    while True:
-        text = f.read(4096)  # read 4KB at a time
-        if text == "":
-            # file is empty or we have reached the end of the file
-            break
-        if "<|endoftext|>" in text:
-            parts = text.split("<|endoftext|>")
-            until_eot += parts[0]
-
-        ## if "<|endoftext|>" is in the text, we split it and yield the parts
-        ## else if we only see a prefix of "<|endoftext|>", we need to look ahead to see
-        # if the rest of the "<|endoftext|>" is in the next chunk
-
-    return text.split("<|endoftext|>")
-
-
 def pre_tokenize(text: bytes, special_tokens):
     """
     returns a map from bytestring to its frequency in the text.
