@@ -13,6 +13,10 @@ PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s
 class MaxHeapLexLargeEntry:
     frequency: int
     pair: tuple[bytes, bytes]
+    """
+    turn a min-heap with lexicographical descending order
+    into a max-heap with lexicographical ascending order
+    """
 
     def __lt__(self, other):
         return (self.frequency, self.pair) > (other.frequency, other.pair)
@@ -20,20 +24,21 @@ class MaxHeapLexLargeEntry:
 
 def pre_tokenize(text: bytes, special_tokens):
     """
-    returns a map from bytestring to its frequency in the text.
+    returns pre-tokens and their frequency in the text corpus
     """
-    freq_dict = {}
+    pre_token_freq = {}
     text = text.decode("utf-8")  # convert bytes to Unicode string
 
-    # 1. strip special_tokens out from text
+    # 1. strip `special_tokens` out from text
     # 2. for each text part, run regex to extract pre-tokens
     strip_pat = "|".join([re.escape(token) for token in special_tokens])
     for sub_text in re.split(strip_pat, text):
         for s in re.finditer(PAT, sub_text):
             # convert Unicode string to utf-8 encoded bytes (pre-token)
             bs = s[0].encode("utf-8")
-            freq_dict[bs] = freq_dict.get(bs, 0) + 1
-    return freq_dict
+            pre_token_freq[bs] = pre_token_freq.get(bs, 0) + 1
+
+    return pre_token_freq
 
 
 def compute_merges(
@@ -157,6 +162,7 @@ def compute_merges(
             heapq.heappush(pair_freq_heap, MaxHeapLexLargeEntry(new_freq, pair))
 
     return merges
+
 
 def train_bpe(
     input_path: str | os.PathLike,
