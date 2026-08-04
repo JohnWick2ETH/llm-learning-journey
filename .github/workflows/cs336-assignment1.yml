@@ -1,0 +1,43 @@
+name: CS336 Assignment 1
+
+on:
+  push:
+    paths:
+      - "cs336/assignment1-basics/**"
+      - ".github/workflows/cs336-assignment1.yml"
+  pull_request:
+    paths:
+      - "cs336/assignment1-basics/**"
+      - ".github/workflows/cs336-assignment1.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cs336-assignment1-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    name: pytest (Python 3.12)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: cs336/assignment1-basics
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          working-directory: cs336/assignment1-basics
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: cs336/assignment1-basics/uv.lock
+
+      - name: Run pytest (train_bpe)
+        run: uv run --frozen pytest tests/test_train_bpe.py 
