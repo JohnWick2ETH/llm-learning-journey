@@ -1,5 +1,6 @@
 import heapq
 import os
+import json
 import regex as re
 from concurrent.futures import ProcessPoolExecutor
 from .pretokenization_example import find_chunk_boundaries
@@ -210,13 +211,25 @@ def train_bpe_tinystories(data_folder):
     """
     Train a Byte Pair Encoding (BPE) tokenizer specifically for the TinyStories dataset.
     """
-    train_bpe(
-        input_path="%s/TinyStoriesV2-GPT4-valid.txt" % data_folder,
+    vocab, merges = train_bpe(
+        input_path="%s/TinyStoriesV2-GPT4-train.txt" % data_folder,
         vocab_size=10000,
         special_tokens=["<|endoftext|>"],
     )
-    pass
 
+    vocab_path = "%s/train-bpe-tinystories-vocab.json" % data_folder
+    merges_path = "%s/train-bpe-tinystories-merges.txt" % data_folder
+
+    with open(vocab_path, "w", encoding="utf-8") as f:
+        # store each token as hex-encoded string to avoid issues with non-UTF-8 bytes
+        json.dump(
+            {token.hex(): token_id for token_id, token in vocab.items()},
+            f,
+            ensure_ascii=False,
+        )
+    with open(merges_path, "w", encoding="utf-8") as f:
+        for token1, token2 in merges:
+            f.write(f"{token1.hex()} {token2.hex()}\n")
 
 def train_bpe_expts_owt(data_folder):
     """
@@ -230,8 +243,4 @@ def train_bpe_expts_owt(data_folder):
 
 
 if __name__ == "__main__":
-    train_bpe(
-        input_path="../data/TinyStoriesV2-GPT4-valid.txt",
-        vocab_size=10000,
-        special_tokens=["<|endoftext|>"],
-    )
+    train_bpe_tinystories(data_folder="../data")
