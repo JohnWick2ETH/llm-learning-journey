@@ -4,6 +4,7 @@ import regex as re
 from concurrent.futures import ProcessPoolExecutor
 from .pretokenization_example import find_chunk_boundaries
 from dataclasses import dataclass
+from collections import Counter
 
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 
@@ -49,26 +50,27 @@ def compute_merges(
     pre_token_to_idx = {pre_token: i for i, pre_token in enumerate(pre_tokens)}
 
     # 1. get the initial bytes pair frequency dict from pre_tokens_dict
+    # always track the frequency of each pair,
+    # but cannot be used to find the most frequent pair
     pair_freq = {}
-    pair_to_pre_tokens = {}
+    pair_to_pre_tokens = {}  # track pre-tokens that have a given pair as substring
     pre_token_decomp = {}  # each pre_token is decomposed as a sequence of symbols
     for pre_token, count in pre_tokens_freq.items():
         # pre_token is a bytes object
         pre_token_idx = pre_token_to_idx[pre_token]
         cur_decomp = [bytes([v]) for v in pre_token]
         pre_token_decomp[pre_token_idx] = cur_decomp
+
+        pairs = Counter()
         for p0, p1 in zip(cur_decomp[:-1], cur_decomp[1:]):
-            # pair_list stores all the pre-token that have it as substring
-            # each item in the list has the form (pre_token_idx, pos, count)
             pair = (p0, p1)
-            pair_list = pair_to_pre_tokens.setdefault(pair, [])
-            # if a pair occurs multiple times in a pre-token
-            if len(pair_list) > 0 and pair_list[-1][0] == pre_token_idx:
-                old_count = pair_list[-1][1]
-                pair_list[-1] = (pre_token_idx, old_count + count)
-            else:
-                pair_list.append((pre_token_idx, count))
+            pairs[pair] += count
+
+        for pair, count in pairs.items():
+            # pair_list stores all the pre-token that have it as substring
+            # each item in the list has the form (pre_token_idx, count)
             pair_freq[pair] = pair_freq.get(pair, 0) + count
+            pair_to_pre_tokens.setdefault(pair, []).append((pre_token_idx, count))
 
     # convert pair frequency to max heap
     assert len(pair_freq) != 0
@@ -77,67 +79,76 @@ def compute_merges(
     ]
     heapq.heapify(pair_freq_heap)
     while num_vocabs < vocab_size:
-        # pop out the most frequent pair
-        most_frequent = heapq.heappop(pair_freq_heap)
+        # pop out the most frequent pair as new merge
+        # it's possible that a pair has multiple frequency records
+        # in the max-heap, so called "stale" records,
+        # we need to pop out stale records until we find the most recent one
+        # the accurate frequency of a pair is stored in `pair_freq` dict
+        while True:
+            most_frequent = heapq.heappop(pair_freq_heap)
+            if pair_freq[most_frequent.pair] == most_frequent.frequency:
+                break
         most_frequent_pair = most_frequent.pair
         merges.append(most_frequent_pair)
         num_vocabs += 1
 
         # [...,a,b,c,d,...] if [b,c] are merged, then we need to
-        # 1. push [a,bc] to max-heap
-        # 2. push [bc,d] to max-heap
+        # 1. decrease [a,b]'s frequency, push [a,bc] to max-heap
+        # 2. decrease [c,d]'s frequency, push [bc,d] to max-heap
         # 3. remove [b,c] from max-heap
-        new_pairs_freq = {}
-        pair_pre_tokens = pair_to_pre_tokens[most_frequent_pair]
-        for pre_token_idx, count in pair_pre_tokens:
+
+        pair_freq_diffs = (
+            {}
+        )  # track the frequency change of each pair after applying this merge
+        for pre_token_idx, count in pair_to_pre_tokens[most_frequent_pair]:
             pre_token = pre_tokens[pre_token_idx]
+
+            # decompositions of pre-token before/after applying merge
             cur_decomp = pre_token_decomp[pre_token_idx]
-            # find a, d
-            # find non-overlapping occurrences of [b,c] in pre-token-symbols
-            pos = 0
             new_decomp = []
-            old_pair = most_frequent_pair[0] + most_frequent_pair[1]
+
+            # compute new decomposition: replace non-overlapping occurences of [b,c] by [bc]
+            merge = most_frequent_pair[0] + most_frequent_pair[1]
+            pos = 0
             while pos < len(cur_decomp) - 1:
                 if (
                     cur_decomp[pos] == most_frequent_pair[0]
                     and cur_decomp[pos + 1] == most_frequent_pair[1]
                 ):
-                    # print(
-                    #     "merge %s for pre_token %s with decomp %s"
-                    #     % (old_pair, pre_token, cur_decomp)
-                    # )
-                    if pos > 0:
-                        left = cur_decomp[pos - 1]
-                        new_pair = (left, old_pair)
-                        new_pairs_freq[new_pair] = (
-                            new_pairs_freq.get(new_pair, 0) + count
-                        )
-                        new_pair_list = pair_to_pre_tokens.setdefault(new_pair, [])
-                        new_pair_list.append((pre_token_idx, count))
-
-                    if pos != len(cur_decomp) - 2:
-                        right = cur_decomp[pos + 2]
-                        new_pair = (old_pair, right)
-                        new_pairs_freq[new_pair] = (
-                            new_pairs_freq.get(new_pair, 0) + count
-                        )
-                        new_pair_list = pair_to_pre_tokens.setdefault(new_pair, [])
-                        new_pair_list.append((pre_token_idx, count))
-
-                    # replacing non-overlapping occurences of [b,c] by [bc]
-                    new_decomp.append(old_pair)
+                    new_decomp.append(merge)
                     pos += 2
                 else:
                     new_decomp.append(cur_decomp[pos])
-                    pos += 1  # check next symbol
+                    pos += 1
             if pos == len(cur_decomp) - 1:
                 new_decomp.append(cur_decomp[-1])
-            # pre-token is replaced by new decomposition (with [b,c] replaced by [bc])
+
+            # counter for old pairs and new pairs in the pre-token
+            old_pairs = Counter()
+            new_pairs = Counter()
+            for p0, p1 in zip(cur_decomp[:-1], cur_decomp[1:]):
+                old_pairs[(p0, p1)] += count
+            for p0, p1 in zip(new_decomp[:-1], new_decomp[1:]):
+                new_pairs[(p0, p1)] += count
+            new_pairs.subtract(old_pairs)
+
+            # update pre-token's decomposition
             pre_token_decomp[pre_token_idx] = new_decomp
 
-        # insert [a,bc] and [bc,d] to pair frequency max heap
-        for new_pair, count in new_pairs_freq.items():
-            heapq.heappush(pair_freq_heap, MaxHeapLexLargeEntry(count, new_pair))
+            # update pair_to_pre_tokens, pair_freq, and pair_freq_heap
+            for pair, delta_count in new_pairs.items():
+                pair_freq_diffs[pair] = pair_freq_diffs.get(pair, 0) + delta_count
+                if delta_count > 0:
+                    # update pair_to_pre_tokens for new pair
+                    pair_to_pre_tokens.setdefault(pair, []).append(
+                        (pre_token_idx, delta_count)
+                    )
+
+        # update pair_freq and pair_freq_heap
+        for pair, freq_count_diff in pair_freq_diffs.items():
+            new_freq = pair_freq.get(pair, 0) + freq_count_diff
+            pair_freq[pair] = new_freq
+            heapq.heappush(pair_freq_heap, MaxHeapLexLargeEntry(new_freq, pair))
 
     return merges
 
@@ -166,7 +177,7 @@ def train_bpe(
             chunk = f.read(end - start)
             chunks.append(chunk)
         with ProcessPoolExecutor(max_workers=os.cpu_count()) as executor:
-            st_chunks = special_tokens * len(chunks)
+            st_chunks = [special_tokens] * len(chunks)
             freqs = list(executor.map(pre_tokenize, chunks, st_chunks))
             # merge N frequency dictionaries into one
             merged_freq = {}
@@ -181,7 +192,6 @@ def train_bpe(
         vocab_list.extend((merge[0] + merge[1]) for merge in merges)
 
     vocab = {i: v for i, v in enumerate(vocab_list)}
-    print(vocab.values())
     return vocab, merges
 
 
