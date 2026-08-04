@@ -49,12 +49,11 @@ def compute_merges(
     pre_tokens = list(pre_tokens_freq.keys())
     pre_token_to_idx = {pre_token: i for i, pre_token in enumerate(pre_tokens)}
 
-    # 1. get the initial bytes pair frequency dict from pre_tokens_dict
-    # always track the frequency of each pair,
-    # but cannot be used to find the most frequent pair
-    pair_freq = {}
+    pair_freq = {}  # always track the frequency of each pair
     pair_to_pre_tokens = {}  # track pre-tokens that have a given pair as substring
     pre_token_decomp = {}  # each pre_token is decomposed as a sequence of symbols
+
+    # 1. get the initial pair frequency dict from pre_tokens_dict
     for pre_token, count in pre_tokens_freq.items():
         # pre_token is a bytes object
         pre_token_idx = pre_token_to_idx[pre_token]
@@ -70,14 +69,17 @@ def compute_merges(
             # pair_list stores all the pre-token that have it as substring
             # each item in the list has the form (pre_token_idx, count)
             pair_freq[pair] = pair_freq.get(pair, 0) + count
-            pair_to_pre_tokens.setdefault(pair, []).append((pre_token_idx, count))
+            pair_to_pre_tokens.setdefault(pair, []).append(pre_token_idx)
 
-    # convert pair frequency to max heap
+    # 2. convert pair frequency to max heap
     assert len(pair_freq) != 0
     pair_freq_heap = [
         MaxHeapLexLargeEntry(count, key) for key, count in pair_freq.items()
     ]
     heapq.heapify(pair_freq_heap)
+
+    # 3. iteratively pop out the most frequent pair as new merge
+    #    and update the pair frequency dict and max heap
     while num_vocabs < vocab_size:
         # pop out the most frequent pair as new merge
         # it's possible that a pair has multiple frequency records
@@ -92,22 +94,18 @@ def compute_merges(
         merges.append(most_frequent_pair)
         num_vocabs += 1
 
-        # [...,a,b,c,d,...] if [b,c] are merged, then we need to
-        # 1. decrease [a,b]'s frequency, push [a,bc] to max-heap
-        # 2. decrease [c,d]'s frequency, push [bc,d] to max-heap
-        # 3. remove [b,c] from max-heap
+        # track the frequency change of each pair after applying this merge
+        pair_freq_diffs = {}
 
-        pair_freq_diffs = (
-            {}
-        )  # track the frequency change of each pair after applying this merge
-        for pre_token_idx, count in pair_to_pre_tokens[most_frequent_pair]:
+        # compute new decomposition: replace non-overlapping occurences of [b,c] by [bc]
+        for pre_token_idx in pair_to_pre_tokens[most_frequent_pair]:
             pre_token = pre_tokens[pre_token_idx]
+            pre_token_count = pre_tokens_freq[pre_token]
 
             # decompositions of pre-token before/after applying merge
             cur_decomp = pre_token_decomp[pre_token_idx]
             new_decomp = []
 
-            # compute new decomposition: replace non-overlapping occurences of [b,c] by [bc]
             merge = most_frequent_pair[0] + most_frequent_pair[1]
             pos = 0
             while pos < len(cur_decomp) - 1:
@@ -127,22 +125,30 @@ def compute_merges(
             old_pairs = Counter()
             new_pairs = Counter()
             for p0, p1 in zip(cur_decomp[:-1], cur_decomp[1:]):
-                old_pairs[(p0, p1)] += count
+                old_pairs[(p0, p1)] += pre_token_count
             for p0, p1 in zip(new_decomp[:-1], new_decomp[1:]):
-                new_pairs[(p0, p1)] += count
-            new_pairs.subtract(old_pairs)
+                new_pairs[(p0, p1)] += pre_token_count
 
             # update pre-token's decomposition
             pre_token_decomp[pre_token_idx] = new_decomp
 
-            # update pair_to_pre_tokens, pair_freq, and pair_freq_heap
+            # update pair_to_pre_tokens
+            for pair, _ in old_pairs.items():
+                if pair not in new_pairs:
+                    # old pair no longer exists in this pre-token
+                    # so we need to remove it from the list
+                    pair_to_pre_tokens[pair] = [
+                        idx for idx in pair_to_pre_tokens[pair] if idx != pre_token_idx
+                    ]
+            for pair, _ in new_pairs.items():
+                if pair not in old_pairs:
+                    # new pair occurs in the new decomposition but not in the old one
+                    # we need to add it to pair_to_pre_tokens
+                    pair_to_pre_tokens.setdefault(pair, []).append(pre_token_idx)
+
+            new_pairs.subtract(old_pairs)
             for pair, delta_count in new_pairs.items():
                 pair_freq_diffs[pair] = pair_freq_diffs.get(pair, 0) + delta_count
-                if delta_count > 0:
-                    # update pair_to_pre_tokens for new pair
-                    pair_to_pre_tokens.setdefault(pair, []).append(
-                        (pre_token_idx, delta_count)
-                    )
 
         # update pair_freq and pair_freq_heap
         for pair, freq_count_diff in pair_freq_diffs.items():
@@ -151,7 +157,6 @@ def compute_merges(
             heapq.heappush(pair_freq_heap, MaxHeapLexLargeEntry(new_freq, pair))
 
     return merges
-
 
 def train_bpe(
     input_path: str | os.PathLike,
