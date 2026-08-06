@@ -27,19 +27,23 @@ def pre_tokenize(text: bytes, special_tokens):
     """
     returns pre-tokens and their frequency in the text corpus
     """
-    pre_token_freq = {}
     text = text.decode("utf-8")  # convert bytes to Unicode string
 
     # 1. strip `special_tokens` out from text
     # 2. for each text part, run regex to extract pre-tokens
+    pre_tokens = {}
     strip_pat = "|".join([re.escape(token) for token in special_tokens])
-    for sub_text in re.split(strip_pat, text):
+    if len(special_tokens) == 0:
+        stripped_text = [text]
+    else:
+        stripped_text = re.split(strip_pat, text)
+    for sub_text in stripped_text:
         for s in re.finditer(PAT, sub_text):
             # convert Unicode string to utf-8 encoded bytes (pre-token)
             bs = s[0].encode("utf-8")
-            pre_token_freq[bs] = pre_token_freq.get(bs, 0) + 1
+            pre_tokens[bs] = pre_tokens.get(bs, 0) + 1
 
-    return pre_token_freq
+    return pre_tokens
 
 
 def compute_merges(

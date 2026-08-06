@@ -41,3 +41,6 @@ jobs:
 
       - name: Run pytest (train_bpe)
         run: uv run --frozen pytest tests/test_train_bpe.py 
+
+      - name: Run pytest (tokenizer)
+        run: uv run --frozen pytest tests/test_tokenizer.py
