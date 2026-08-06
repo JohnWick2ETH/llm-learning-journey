@@ -21,7 +21,10 @@ class BPETokenizer:
             pair: (len(merges) - i) for i, pair in enumerate(merges)
         }  # 0 is the lowest priority
         self.vocab_lkt = {token: id for id, token in vocab.items()}  # token id -> token
-        self.special_tokens = sorted(special_tokens, key=len, reverse=True)
+        if special_tokens != None:
+            self.special_tokens = sorted(special_tokens, key=len, reverse=True)
+        else:
+            self.special_tokens = None
 
     @classmethod
     def from_files(cls, vocab_path: str, merges_path: str, special_tokens=None):
