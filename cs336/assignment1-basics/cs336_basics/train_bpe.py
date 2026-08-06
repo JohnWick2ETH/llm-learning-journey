@@ -193,8 +193,7 @@ def train_bpe(
             chunks.append(chunk)
         with ProcessPoolExecutor(max_workers=os.cpu_count()) as executor:
             st_chunks = [special_tokens] * len(chunks)
-            ret_freq = [True] * len(chunks)
-            freqs = list(executor.map(pre_tokenize, chunks, ret_freq, st_chunks))
+            freqs = list(executor.map(pre_tokenize, chunks, st_chunks))
             # merge N frequency dictionaries into one
             merged_freq = {}
             for freq in freqs:
