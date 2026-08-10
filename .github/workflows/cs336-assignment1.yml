@@ -44,3 +44,6 @@ jobs:
 
       - name: Run pytest (tokenizer)
         run: uv run --frozen pytest tests/test_tokenizer.py
+
+      - name: Run pytest (transformer model)
+        run: uv run --frozen pytest tests/test_model.py
