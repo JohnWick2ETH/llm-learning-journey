@@ -51,3 +51,39 @@ class Embedding(nn.Module):
         # returned tensor has shape (batch_size, sequence_length, d_model)
 
         return self.e_matrix[token_ids]
+
+
+class RMSNorm(nn.Module):
+
+    def __init__(
+        self,
+        d_model: int,
+        eps: float = 1e-5,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ):
+        super().__init__()
+        self.d_model = d_model
+        self.eps = eps
+        self.weights = nn.Parameter(torch.empty(d_model))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        computes RMS norm for each vector in the input tensor of shape (batch_size, sequence_length, d_model)
+        returns a new tensor with same shape as input
+        """
+        assert self.weights != None
+
+        in_dtype = x.dtype
+        x = x.to(torch.float32)
+
+        # rms is a tensor with shape (batch_size, sequence_length, 1)
+        rms = torch.linalg.vector_norm(x, dim=-1, keepdim = True)
+
+        w_aligned = self.weights.reshape(1, 1, x.shape[2])
+
+        f = lambda a, s, g: a * g / torch.sqrt(s*s / self.d_model + self.eps)
+
+        y = f(x, rms, w_aligned)
+
+        return y.to(in_dtype)
