@@ -78,12 +78,41 @@ class RMSNorm(nn.Module):
         x = x.to(torch.float32)
 
         # rms is a tensor with shape (batch_size, sequence_length, 1)
-        rms = torch.linalg.vector_norm(x, dim=-1, keepdim = True)
+        rms = torch.linalg.vector_norm(x, dim=-1, keepdim=True)
 
         w_aligned = self.weights.reshape(1, 1, x.shape[2])
 
-        f = lambda a, s, g: a * g / torch.sqrt(s*s / self.d_model + self.eps)
+        f = lambda a, s, g: a * g / torch.sqrt(s * s / self.d_model + self.eps)
 
         y = f(x, rms, w_aligned)
 
         return y.to(in_dtype)
+
+
+class SwiGLUFeedForwardNetwork(nn.Module):
+
+    def __init__(
+        self,
+        d_model: int,
+        d_ff: int,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ):
+        super().__init__()
+        self.d_model = d_model
+        self.d_ff = d_ff
+
+        self.w1 = nn.Parameter(torch.empty(d_ff, d_model))
+        self.w2 = nn.Parameter(torch.empty(d_model, d_ff))
+        self.w3 = nn.Parameter(torch.empty(d_ff, d_model))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        computes W2 * (SiLU(W1*x) ⊙ W3*x)
+        """
+        silu = lambda x: torch.sigmoid(x) * x
+
+        y1 = silu(x @ self.w1.T)
+        y2 = x @ self.w3.T
+
+        return (y1 * y2) @ self.w2.T

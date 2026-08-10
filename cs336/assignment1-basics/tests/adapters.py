@@ -10,8 +10,9 @@ from jaxtyping import Bool, Float, Int
 from torch import Tensor
 from cs336_basics.train_bpe import train_bpe
 from cs336_basics.tokenizer import BPETokenizer
-from cs336_basics.model import Linear, Embedding, RMSNorm
+from cs336_basics.model import Linear, Embedding, RMSNorm, SwiGLUFeedForwardNetwork
 from cs336_basics.utils import softmax
+
 
 def run_linear(
     d_in: int,
@@ -86,14 +87,11 @@ def run_swiglu(
     Returns:
         Float[Tensor, "... d_model"]: Output embeddings of the same shape as the input embeddings.
     """
-    # Example:
-    # If your state dict keys match, you can use `load_state_dict()`
-    # swiglu.load_state_dict(weights)
-    # You can also manually assign the weights
-    # swiglu.w1.weight.data = w1_weight
-    # swiglu.w2.weight.data = w2_weight
-    # swiglu.w3.weight.data = w3_weight
-    raise NotImplementedError
+    swiglu = SwiGLUFeedForwardNetwork(d_model=d_model, d_ff=d_ff)
+
+    swiglu.load_state_dict({"w1": w1_weight, "w2": w2_weight, "w3": w3_weight})
+
+    return swiglu(in_features)
 
 
 def run_scaled_dot_product_attention(
@@ -466,7 +464,9 @@ def run_cross_entropy(
     raise NotImplementedError
 
 
-def run_gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm: float) -> None:
+def run_gradient_clipping(
+    parameters: Iterable[torch.nn.Parameter], max_l2_norm: float
+) -> None:
     """Given a set of parameters, clip their combined gradients to have l2 norm at most max_l2_norm.
 
     Args:
@@ -603,4 +603,4 @@ def run_train_bpe(
                 representing that <token1> was merged with <token2>.
                 Merges are ordered by order of creation.
     """
-    return train_bpe(input_path, vocab_size, special_tokens)    
+    return train_bpe(input_path, vocab_size, special_tokens)
