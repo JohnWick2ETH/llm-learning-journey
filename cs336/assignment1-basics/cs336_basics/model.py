@@ -1,6 +1,8 @@
 import torch.nn as nn
 import torch
 from math import sqrt
+from .utils import softmax
+from einops import einsum, rearrange
 
 
 class Linear(nn.Module):
@@ -116,3 +118,33 @@ class SwiGLUFeedForwardNetwork(nn.Module):
         y2 = x @ self.w3.T
 
         return (y1 * y2) @ self.w2.T
+
+
+class SingleHeadAttension(nn.Module):
+
+    def __init__(self):
+        super().__init__()
+
+    def forward(
+        self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, mask: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        softmax(masked(Q * K^T / sqrt(d_k))) * V
+        """
+
+        # q is tensor with shape (... queries d_k)
+        # k is tensor with shape (... keys d_k)
+        # v is tensor with shape (... keys d_v)
+        # mask is tensor with shape (... queries keys)
+
+        qk = einsum(q, k, "... queries d_k, ... keys d_k -> ... queries keys")
+
+        dk = q.size(-1)
+        qk = qk / sqrt(dk)
+
+        # tensor with shape (... queries keys)
+        masked_qk = qk.masked_fill(~mask, float("-inf"))
+        alpha = softmax(masked_qk, -1)
+
+        # returned tensor is of shape (... queries d_v)
+        return einsum(alpha, v, "... queries keys, ... keys d_v -> ... queries d_v")
