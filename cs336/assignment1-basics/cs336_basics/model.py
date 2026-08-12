@@ -120,7 +120,7 @@ class SwiGLUFeedForwardNetwork(nn.Module):
         return (y1 * y2) @ self.w2.T
 
 
-class SingleHeadAttension(nn.Module):
+class SingleHeadSelfAttension(nn.Module):
 
     def __init__(self):
         super().__init__()
@@ -148,3 +148,54 @@ class SingleHeadAttension(nn.Module):
 
         # returned tensor is of shape (... queries d_v)
         return einsum(alpha, v, "... queries keys, ... keys d_v -> ... queries d_v")
+
+
+class MultiHeadSelfAttention(nn.Module):
+
+    def __init__(self, d_model: int, num_heads: int):
+        super().__init__()
+        self.d_model = d_model
+        self.num_heads = num_heads
+
+        self.q_weight = nn.Parameter(torch.empty(d_model, d_model))
+        self.k_weight = nn.Parameter(torch.empty(d_model, d_model))
+        self.v_weight = nn.Parameter(torch.empty(d_model, d_model))
+        self.o_weight = nn.Parameter(torch.empty(d_model, d_model))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        hi = SingleHeadSelfAttention(qi, ki, vi) where [qi] = W_Q*x, [ki] = W_K*x, [vi] = W_V*x
+             and x is a tensor with shape (... seq_len d_model)
+        h = h0 || h1 || ...
+        returns o*h
+        """
+        seq_len = x.size(-2)
+
+        # x has shape (... seq_len d_model)
+        # each qi has shape (... seq_len d_k) where d_k = d_model / num_heads
+        qi = rearrange(
+            x @ self.q_weight.T,
+            "... seq_len (num_heads d_k) -> ... num_heads seq_len d_k",
+            num_heads=self.num_heads,
+        )
+        ki = rearrange(
+            x @ self.k_weight.T,
+            "... seq_len (num_heads d_k) -> ... num_heads seq_len d_k",
+            num_heads=self.num_heads,
+        )
+        vi = rearrange(
+            x @ self.v_weight.T,
+            "... seq_len (num_heads d_v) -> ... num_heads seq_len d_v",
+            num_heads=self.num_heads,
+        )
+
+        casual_mask = torch.tril(torch.ones(seq_len, seq_len, dtype=bool))
+        att = SingleHeadSelfAttension()
+
+        # the tensor has shape (... num_heads seq_len d_v)
+        heads = att(qi, ki, vi, casual_mask)
+        heads = rearrange(
+            heads, "... num_heads seq_len d_v -> ... seq_len (num_heads d_v)"
+        )
+
+        return heads @ self.o_weight.T

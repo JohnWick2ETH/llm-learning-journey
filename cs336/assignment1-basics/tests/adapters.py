@@ -15,7 +15,8 @@ from cs336_basics.model import (
     Embedding,
     RMSNorm,
     SwiGLUFeedForwardNetwork,
-    SingleHeadAttension,
+    SingleHeadSelfAttension,
+    MultiHeadSelfAttention,
 )
 from cs336_basics.utils import softmax, silu
 
@@ -119,7 +120,7 @@ def run_scaled_dot_product_attention(
         Float[Tensor, " ... queries d_v"]: Output of SDPA
     """
 
-    att = SingleHeadAttension()
+    att = SingleHeadSelfAttension()
 
     return att(Q, K, V, mask)
 
@@ -155,7 +156,18 @@ def run_multihead_self_attention(
         Float[Tensor, " ... sequence_length d_model"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+    att = MultiHeadSelfAttention(d_model, num_heads)
+
+    att.load_state_dict(
+        {
+            "q_weight": q_proj_weight,
+            "k_weight": k_proj_weight,
+            "v_weight": v_proj_weight,
+            "o_weight": o_proj_weight,
+        }
+    )
+
+    return att(in_features)
 
 
 def run_multihead_self_attention_with_rope(
