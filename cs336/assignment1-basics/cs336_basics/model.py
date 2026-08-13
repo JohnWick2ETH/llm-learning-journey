@@ -1,6 +1,6 @@
 import torch.nn as nn
 import torch
-from math import sqrt
+from math import sqrt, cos, sin, pow
 from .utils import softmax
 from einops import einsum, rearrange
 
@@ -199,3 +199,59 @@ class MultiHeadSelfAttention(nn.Module):
         )
 
         return heads @ self.o_weight.T
+
+
+class RotaryPositionalEmbedding(nn.Module):
+
+    def __init__(
+        self,
+        theta: float,
+        d_k: int,
+        max_seq_len: int,
+        device: torch.device | None = None,
+    ):
+        super().__init__()
+        self.theta = theta
+        self.d_k = d_k
+        self.seq_len = max_seq_len
+
+        # precompute 2x2 diagonal matrix M_{i,k} from 𝜃_{i,k}
+        # 𝜃_{i,k} = i / 𝜃^((2k-2)/d) for k ∈ {1, ..., d/2}
+
+        running_thetas = [1.0]
+        for k in range(1, d_k // 2):
+            running_thetas.append(running_thetas[k - 1] * pow(theta, 2.0 / d_k))
+
+        m = []
+        m.append([[[1.0, 0.0], [0.0, 1.0]] for _ in range(d_k // 2)])
+        for i in range(1, max_seq_len):
+            mi = []
+            for theta_k in running_thetas:
+                c, s = cos(i / theta_k), sin(i / theta_k)
+                mi.append([[c, -s], [s, c]])
+            m.append(mi)
+
+        tensor_m = torch.Tensor(m)
+        assert tensor_m.shape[0] == max_seq_len
+        assert tensor_m.shape[1] == d_k // 2
+        assert tensor_m.shape[2] == 2
+        assert tensor_m.shape[3] == 2
+
+        self.register_buffer("rotation_matrices", tensor_m, persistent=False)
+
+    def forward(self, x: torch.Tensor, token_positions: torch.Tensor) -> torch.Tensor:
+        """
+        x is a tensor of shape (... seq_len d_k)
+        token positions are a tensor of shape (... seq_len)
+        """
+        # note that self.matrix is a tensor of shape (seq_len, d_k/2, 2, 2)
+        # for each pos, apply rotation transformation to the input embedding vector
+        rotations = self.rotation_matrices[token_positions]
+        x_pairs = rearrange(
+            x, "... seq_len (half pair) -> ... seq_len half pair", pair=2
+        )
+        rotated = einsum(rotations, x_pairs, "... s p o i, ... s p i -> ... s p o")
+
+        return rearrange(
+            rotated, "... seq_len half pair -> ... seq_len (half pair)", pair=2
+        )
