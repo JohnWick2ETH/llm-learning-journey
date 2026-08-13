@@ -18,6 +18,8 @@ from cs336_basics.model import (
     SingleHeadSelfAttension,
     MultiHeadSelfAttention,
     RotaryPositionalEmbedding,
+    MultiHeadSelfAttentionWithROPE,
+    TransformerBlock,
 )
 from cs336_basics.utils import softmax, silu
 
@@ -208,7 +210,20 @@ def run_multihead_self_attention_with_rope(
         Float[Tensor, " ... sequence_length d_model"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+    att = MultiHeadSelfAttentionWithROPE(
+        d_model=d_model, num_heads=num_heads, max_seq_len=max_seq_len, theta=theta
+    )
+
+    att.load_state_dict(
+        {
+            "q_weight": q_proj_weight,
+            "k_weight": k_proj_weight,
+            "v_weight": v_proj_weight,
+            "o_weight": o_proj_weight,
+        }
+    )
+
+    return att(in_features, token_positions)
 
 
 def run_rope(
@@ -304,7 +319,33 @@ def run_transformer_block(
         Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
-    raise NotImplementedError
+    block = TransformerBlock(
+        d_model=d_model,
+        num_heads=num_heads,
+        d_ff=d_ff,
+        max_seq_len=max_seq_len,
+        theta=theta,
+    )
+
+    block.norm_before_attn.load_state_dict({"weights": weights["ln1.weight"]})
+    block.norm_before_ffn.load_state_dict({"weights": weights["ln2.weight"]})
+    block.ffn.load_state_dict(
+        {
+            "w1": weights["ffn.w1.weight"],
+            "w2": weights["ffn.w2.weight"],
+            "w3": weights["ffn.w3.weight"],
+        }
+    )
+    block.attn.load_state_dict(
+        {
+            "q_weight": weights["attn.q_proj.weight"],
+            "k_weight": weights["attn.k_proj.weight"],
+            "v_weight": weights["attn.v_proj.weight"],
+            "o_weight": weights["attn.output_proj.weight"],
+        }
+    )
+
+    return block(in_features)
 
 
 def run_transformer_lm(
