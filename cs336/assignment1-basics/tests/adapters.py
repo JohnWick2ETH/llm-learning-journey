@@ -20,6 +20,7 @@ from cs336_basics.model import (
     RotaryPositionalEmbedding,
     MultiHeadSelfAttentionWithROPE,
     TransformerBlock,
+    TransformerLM,
 )
 from cs336_basics.utils import softmax, silu
 
@@ -427,7 +428,48 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    raise NotImplementedError
+    lm = TransformerLM(
+        vocab_size=vocab_size,
+        context_length=context_length,
+        d_model=d_model,
+        num_layers=num_layers,
+        num_heads=num_heads,
+        d_ff=d_ff,
+        rope_theta=rope_theta,
+    )
+
+    lm.load_state_dict(
+        {
+            "lm_head.weight": weights["lm_head.weight"],
+            "input_embedding.e_matrix": weights["token_embeddings.weight"],
+            "final_norm.weights": weights["ln_final.weight"],
+        }
+    )
+
+    for i in range(num_layers):
+        lm.blocks[i].norm_before_attn.load_state_dict(
+            {"weights": weights["layers.%s.ln1.weight" % i]}
+        )
+        lm.blocks[i].norm_before_ffn.load_state_dict(
+            {"weights": weights["layers.%s.ln2.weight" % i]}
+        )
+        lm.blocks[i].ffn.load_state_dict(
+            {
+                "w1": weights["layers.%s.ffn.w1.weight" % i],
+                "w2": weights["layers.%s.ffn.w2.weight" % i],
+                "w3": weights["layers.%s.ffn.w3.weight" % i],
+            }
+        )
+        lm.blocks[i].attn.load_state_dict(
+            {
+                "q_weight": weights["layers.%s.attn.q_proj.weight" % i],
+                "k_weight": weights["layers.%s.attn.k_proj.weight" % i],
+                "v_weight": weights["layers.%s.attn.v_proj.weight" % i],
+                "o_weight": weights["layers.%s.attn.output_proj.weight" % i],
+            }
+        )
+
+    return lm(in_indices)
 
 
 def run_rmsnorm(

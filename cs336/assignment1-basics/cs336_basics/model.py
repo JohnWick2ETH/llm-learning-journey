@@ -214,7 +214,7 @@ class RotaryPositionalEmbedding(nn.Module):
         super().__init__()
         self.theta = theta
         self.d_k = d_k
-        self.seq_len = max_seq_len
+        self.max_seq_len = max_seq_len
 
         # precompute 2x2 diagonal matrix M_{i,k} from 𝜃_{i,k}
         # 𝜃_{i,k} = i / 𝜃^((2k-2)/d) for k ∈ {1, ..., d/2}
@@ -339,5 +339,58 @@ class TransformerBlock(nn.Module):
         t3 = self.norm_before_ffn(y)
         t4 = self.ffn(t3)
         y = y + t4
-        
+
         return y
+
+
+class TransformerLM(nn.Module):
+    def __init__(
+        self,
+        vocab_size: int,
+        context_length: int,
+        d_model: int,
+        num_layers: int,
+        num_heads: int,
+        d_ff: int,
+        rope_theta: float,
+    ):
+        super().__init__()
+
+        self.vocab_size = vocab_size
+        self.num_layers = num_layers
+        self.lm_head = Linear(in_features=d_model, out_features=vocab_size)
+        self.input_embedding = Embedding(
+            num_embeddings=vocab_size, embedding_dim=d_model
+        )
+        self.final_norm = RMSNorm(d_model=d_model)
+        self.blocks = [
+            TransformerBlock(
+                d_model=d_model,
+                num_heads=num_heads,
+                d_ff=d_ff,
+                max_seq_len=context_length,
+                theta=rope_theta,
+            )
+            for _ in range(num_layers)
+        ]
+
+    def forward(self, in_tokens: torch.Tensor) -> torch.Tensor:
+        """
+        run transformer forward pass on input tokens which are int tensor of shape
+           (batch_size, seq_len) to get unnormalized next-word distribution for each token.
+
+        returns a float tensor of shape (batch_size, sequence_length, vocab_size)
+        """
+        # input embedding
+        x = self.input_embedding(in_tokens)
+
+        # the result of input embedding is a tensor of shape (batch_size, seq_len, d_model)
+        # run `num_layers` transformer blocks iteratively on x
+        for transformer_block in self.blocks:
+            x = transformer_block(x)
+
+        # final norm
+        y = self.final_norm(x)
+
+        # output unembedding to get tensor of shape (batch_size, seq_len, vocab_size)
+        return self.lm_head(y)
