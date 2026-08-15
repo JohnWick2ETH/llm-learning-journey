@@ -1,6 +1,5 @@
 import torch
 
-
 # x[k] = e(x[k]) / \sum_k e(x[k])
 def softmax(x: torch.Tensor, dim_i: int) -> torch.Tensor:
     x_max = torch.amax(x, dim_i, keepdim=True)
@@ -14,3 +13,42 @@ def softmax(x: torch.Tensor, dim_i: int) -> torch.Tensor:
 
 def silu(x: torch.Tensor) -> torch.Tensor:
     return torch.sigmoid(x) * x
+
+
+def log_softmax(x: torch.Tensor, dim_i: int) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    softmax(x) = e(x[i]-max) / sum_j e(x[j]-max)
+    -log(softmax(x)) = log(sum_j e(x[j]-max)) - (x[i]-max)
+
+    Args:
+        x: The input tensor
+        dim_i: The dimension along which to compute the log softmax.
+    """
+    x_max = torch.amax(x, dim_i, keepdim=True)
+    # for numerical stability
+    x_adjusted = x - x_max
+
+    exp_x = torch.exp(x_adjusted)
+    exp_x_sum = torch.sum(exp_x, dim=dim_i, keepdim=True)
+    log_sum = torch.log(exp_x_sum)
+
+    return (x_adjusted, log_sum)
+
+
+def cross_entropy_loss(logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+    """
+    Computes the cross-entropy loss between logits and targets.
+
+    Args:
+        logits: The predicted logits of shape (..., vocab_size)
+        targets: The true next tokens of shape (..., )
+    Returns:
+        torch.Tensor: The average cross-entropy loss.
+    """
+    (x_adjusted, S) = log_softmax(logits, dim_i=-1)
+
+    # x[i] - max(x) for i in targets
+    target_x = x_adjusted.gather(dim=-1, index=targets.unsqueeze(-1))
+
+    loss = (S - target_x).squeeze(-1)
+    return loss.mean()
