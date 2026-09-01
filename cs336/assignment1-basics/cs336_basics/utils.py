@@ -1,4 +1,17 @@
 import torch
+from math import cos, pi
+
+
+def lr_cosine_schedule(t: int, alpha_max: float, alpha_min: float, Tw: int, Tc: int):
+    if t < Tw:
+        return t * alpha_max / Tw
+    elif t <= Tc:
+        return alpha_min + 0.5 * (1 + cos(pi * (t - Tw) / (Tc - Tw))) * (
+            alpha_max - alpha_min
+        )
+    else:
+        return alpha_min
+
 
 # x[k] = e(x[k]) / \sum_k e(x[k])
 def softmax(x: torch.Tensor, dim_i: int) -> torch.Tensor:
