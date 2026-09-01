@@ -1,5 +1,6 @@
-import torch
+from collections.abc import Iterable
 from math import cos, pi
+import torch
 
 
 def lr_cosine_schedule(t: int, alpha_max: float, alpha_min: float, Tw: int, Tc: int):
@@ -11,6 +12,23 @@ def lr_cosine_schedule(t: int, alpha_max: float, alpha_min: float, Tw: int, Tc: 
         )
     else:
         return alpha_min
+
+
+def gradient_clipping_(
+    parameters: Iterable[torch.nn.Parameter], max_l2_norm: float
+) -> None:
+    grads = [p.grad for p in parameters if p.grad is not None]
+
+    if len(grads) == 0:
+        return
+
+    with torch.no_grad():
+        norms = torch.stack([g.norm(2) for g in grads])
+        combined_norm = norms.norm(2)
+        coeff = max_l2_norm / (combined_norm + 1e-6)
+        coeff.clamp_(max=1.0)
+        for g in grads:
+            g.mul_(coeff)
 
 
 # x[k] = e(x[k]) / \sum_k e(x[k])

@@ -22,7 +22,13 @@ from cs336_basics.model import (
     TransformerBlock,
     TransformerLM,
 )
-from cs336_basics.utils import softmax, silu, cross_entropy_loss, lr_cosine_schedule
+from cs336_basics.utils import (
+    softmax,
+    silu,
+    cross_entropy_loss,
+    lr_cosine_schedule,
+    gradient_clipping_,
+)
 from cs336_basics.optimizer import AdamW
 
 
@@ -582,7 +588,7 @@ def run_gradient_clipping(
 
     The gradients of the parameters (parameter.grad) should be modified in-place.
     """
-    raise NotImplementedError
+    gradient_clipping_(parameters, max_l2_norm)
 
 
 def get_adamw_cls() -> Any:
