@@ -52,4 +52,4 @@ jobs:
         run: uv run --frozen pytest tests/test_nn_utils.py tests/test_optimizer.py
 
       - name: Run pytest (training misc)
-        run: uv run --frozen pytest tests/test_data.py
+        run: uv run --frozen pytest tests/test_data.py tests/test_serialization.py
