@@ -30,6 +30,7 @@ from cs336_basics.utils import (
     gradient_clipping_,
 )
 from cs336_basics.optimizer import AdamW
+from cs336_basics.training import get_batch
 
 
 def run_linear(
@@ -540,6 +541,7 @@ def run_get_batch(
         is the sampled input sequences, and the second tuple item is the corresponding
         language modeling labels.
     """
+    return get_batch(dataset, batch_size, context_length, device)
     raise NotImplementedError
 
 
