@@ -175,7 +175,7 @@ def train_bpe(
     input_path: str | os.PathLike,
     vocab_size: int,
     special_tokens: list[str],
-):
+) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
     """
     Train a Byte Pair Encoding (BPE) tokenizer on the input text file.
     The output is (vocab, merges).
