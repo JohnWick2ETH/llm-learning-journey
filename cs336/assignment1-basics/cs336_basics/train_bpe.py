@@ -1,8 +1,11 @@
 import heapq
 import os
+import json
 import regex as re
+import base64
+import time
 from concurrent.futures import ProcessPoolExecutor
-from .pretokenization_example import find_chunk_boundaries
+from cs336_basics.pretokenization_example import find_chunk_boundaries
 from dataclasses import dataclass
 from collections import Counter
 
@@ -210,32 +213,67 @@ def train_bpe(
     return vocab, merges
 
 
+def store_trained_artifacts(vocab, merges, vocab_path, merges_path):
+    """
+    Store the trained BPE artifacts (vocab and merges) to disk.
+    """
+    with open(vocab_path, "w", encoding="utf-8") as f:
+        # store each token as base64-encoded string to avoid issues with non-UTF-8 bytes
+        json.dump(
+            {
+                base64.b64encode(token).decode("utf-8"): token_id
+                for token_id, token in vocab.items()
+            },
+            f,
+            ensure_ascii=False,
+        )
+    with open(merges_path, "w", encoding="utf-8") as f:
+        for token1, token2 in merges:
+            f.write(f"{base64.b64encode(token1)} {base64.b64encode(token2)}\n")
+
+
 def train_bpe_tinystories(data_folder):
     """
     Train a Byte Pair Encoding (BPE) tokenizer specifically for the TinyStories dataset.
     """
-    train_bpe(
-        input_path="%s/TinyStoriesV2-GPT4-valid.txt" % data_folder,
+    start_time = time.perf_counter()
+    vocab, merges = train_bpe(
+        input_path="%s/TinyStoriesV2-GPT4-train.txt" % data_folder,
         vocab_size=10000,
         special_tokens=["<|endoftext|>"],
     )
-    pass
+    end_time = time.perf_counter()
+    print(
+        "time to train bpe over TinyStoriesV2-GPT4-train.txt took %.2fs"
+        % (end_time - start_time)
+    )
+
+    store_trained_artifacts(
+        vocab,
+        merges,
+        vocab_path="%s/train-bpe-tinystories-vocab.json" % data_folder,
+        merges_path="%s/train-bpe-tinystories-merges.txt" % data_folder,
+    )
 
 
 def train_bpe_expts_owt(data_folder):
     """
     Train a Byte Pair Encoding (BPE) tokenizer specifically for the OpenWebText dataset.
     """
-    train_bpe(
+    vocab, merges = train_bpe(
         input_path="%s/owt_train.txt" % data_folder,
-        vocab_size=50000,
+        vocab_size=32000,
         special_tokens=["<|endoftext|>"],
+    )
+
+    store_trained_artifacts(
+        vocab,
+        merges,
+        vocab_path="%s/train-bpe-owt-vocab.json" % data_folder,
+        merges_path="%s/train-bpe-owt-merges.txt" % data_folder,
     )
 
 
 if __name__ == "__main__":
-    train_bpe(
-        input_path="../data/TinyStoriesV2-GPT4-valid.txt",
-        vocab_size=10000,
-        special_tokens=["<|endoftext|>"],
-    )
+    train_bpe_tinystories(data_folder="../data")
+    # train_bpe_expts_owt(data_folder="../data")
