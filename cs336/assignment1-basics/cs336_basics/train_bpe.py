@@ -30,6 +30,7 @@ def pre_tokenize(text: bytes, special_tokens):
     returns pre-tokens and their frequency in the text corpus
     """
     text = text.decode("utf-8")  # convert bytes to Unicode string
+    pat_re = re.compile(PAT)
 
     # 1. strip `special_tokens` out from text
     # 2. for each text part, run regex to extract pre-tokens
@@ -40,11 +41,15 @@ def pre_tokenize(text: bytes, special_tokens):
     else:
         stripped_text = re.split(strip_pat, text)
     for sub_text in stripped_text:
-        for s in re.finditer(PAT, sub_text):
+        for s in pat_re.finditer(sub_text):
             # convert Unicode string to utf-8 encoded bytes (pre-token)
-            bs = s[0].encode("utf-8")
+            bs = s[0]
             pre_tokens[bs] = pre_tokens.get(bs, 0) + 1
 
+    # convert dict[string,int] to dict[bytes,int]
+    pre_tokens = {
+        pre_token.encode("utf-8"): freq for (pre_token, freq) in pre_tokens.items()
+    }
     return pre_tokens
 
 
