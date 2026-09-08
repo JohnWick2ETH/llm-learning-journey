@@ -25,7 +25,7 @@ class MaxHeapLexLargeEntry:
         return (self.frequency, self.pair) > (other.frequency, other.pair)
 
 
-def pre_tokenize(text: bytes, special_tokens):
+def pre_tokenize(text: bytes, special_tokens, worker_id: int):
     """
     returns pre-tokens and their frequency in the text corpus
     """
@@ -40,11 +40,14 @@ def pre_tokenize(text: bytes, special_tokens):
         stripped_text = [text]
     else:
         stripped_text = re.split(strip_pat, text)
+    start_t = time.perf_counter()
     for sub_text in stripped_text:
         for s in pat_re.finditer(sub_text):
-            # convert Unicode string to utf-8 encoded bytes (pre-token)
             bs = s[0]
             pre_tokens[bs] = pre_tokens.get(bs, 0) + 1
+    end_t = time.perf_counter()
+    if worker_id == 0:
+        print("pre_tokenize took %.2fs" % (end_t - start_t))
 
     # convert dict[string,int] to dict[bytes,int]
     pre_tokens = {
@@ -201,7 +204,8 @@ def train_bpe(
             chunks.append(chunk)
         with ProcessPoolExecutor(max_workers=os.cpu_count()) as executor:
             st_chunks = [special_tokens] * len(chunks)
-            freqs = list(executor.map(pre_tokenize, chunks, st_chunks))
+            worker_ids = [i for i in range(len(chunks))]
+            freqs = list(executor.map(pre_tokenize, chunks, st_chunks, worker_ids))
             # merge N frequency dictionaries into one
             merged_freq = {}
             for freq in freqs:
