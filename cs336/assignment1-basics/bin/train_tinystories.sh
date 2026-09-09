@@ -12,11 +12,11 @@ if [[ -n "${PROFILE:-}" ]]; then
     uv run --with py-spy py-spy record --format raw --full-filenames \
         --subprocesses --output profile.pyspy --rate 5 --threads -- \
         python train_tokenizer.py --input ../data/TinyStoriesV2-GPT4-train.txt \
-        --vocab_size 10000 --special_tokens "<|endoftoken|>" \
+        --data_set tinystories --vocab_size 10000 --special_tokens "<|endoftoken|>" \
         --artifacts ../data/
 else
     uv run python train_tokenizer.py --input ../data/TinyStoriesV2-GPT4-train.txt \
-        --vocab_size 10000 --special_tokens "<|endoftoken|>" \
+        --data_set tinystories --vocab_size 10000 --special_tokens "<|endoftoken|>" \
         --artifacts ../data/
 fi
 

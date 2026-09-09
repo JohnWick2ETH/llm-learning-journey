@@ -11,11 +11,11 @@
 if [[ -n "${PROFILE:-}" ]]; then
     uv run --with py-spy py-spy record --format raw --full-filenames \
         --subprocesses --output profile.pyspy --rate 5 --threads -- \
-        python train_tokenizer.py --input ../data/owt_train.txt \
+        python train_tokenizer.py --input ../data/owt_train.txt --data_set owt \
         --vocab_size 32000 --special_tokens "<|endoftoken|>" \
         --artifacts ../data/
 else
-    uv run python train_tokenizer.py --input ../data/owt_train.txt \
+    uv run python train_tokenizer.py --input ../data/owt_train.txt --data_set owt \
         --vocab_size 32000 --special_tokens "<|endoftoken|>" \
         --artifacts ../data/
 fi
