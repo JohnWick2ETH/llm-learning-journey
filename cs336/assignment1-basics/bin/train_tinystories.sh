@@ -8,23 +8,25 @@
 #  the output will be `vocab.json` and `merges.txt`.
 
 # profile with py-spy
-if [[ -n "${PROFILE:-}" ]]; then
-    uv run --with py-spy py-spy record --format raw --full-filenames \
-        --subprocesses --output profile.pyspy --rate 5 --threads -- \
-        python train_tokenizer.py --input ../data/TinyStoriesV2-GPT4-train.txt \
-        --data_set tinystories --vocab_size 10000 --special_tokens "<|endoftoken|>" \
-        --artifacts ../data/
-else
-    uv run python train_tokenizer.py --input ../data/TinyStoriesV2-GPT4-train.txt \
-        --data_set tinystories --vocab_size 10000 --special_tokens "<|endoftoken|>" \
-        --artifacts ../data/
+if [ ! -f "../data/tinystories_vocab.json" ]; then
+    if [[ -n "${PROFILE:-}" ]]; then
+        uv run --with py-spy py-spy record --format raw --full-filenames \
+            --subprocesses --output profile.pyspy --rate 5 --threads -- \
+            python train_tokenizer.py --input ../data/TinyStoriesV2-GPT4-train.txt \
+            --data_set tinystories --vocab_size 10000 --special_tokens "<|endoftext|>" \
+            --artifacts ../data/
+    else
+        uv run python train_tokenizer.py --input ../data/TinyStoriesV2-GPT4-train.txt \
+            --data_set tinystories --vocab_size 10000 --special_tokens "<|endoftext|>" \
+            --artifacts ../data/
+    fi
 fi
 
 
 # 2. encode the input text given the tokenizer from step 1
 #   the output will be a file of tokens for the given input text
 
-# python3 token_encoder.py --vocab vocab.json --merges merges.txt \
-#    --input train.txt --output train.tokens --dtype uint16
+uv run python token_encoder.py --vocab ../data/tinystories_vocab.json --merges ../data/tinystories_merges.txt \
+   --input ../data/TinyStoriesV2-GPT4-train.txt --output ../data/tinystories_token.txt
 
 # 3. train the transformer based language model

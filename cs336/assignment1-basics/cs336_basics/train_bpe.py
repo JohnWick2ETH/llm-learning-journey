@@ -253,4 +253,10 @@ def store_trained_artifacts(vocab, merges, vocab_path, merges_path):
         )
     with open(merges_path, "w", encoding="utf-8") as f:
         for token1, token2 in merges:
-            f.write(f"{base64.b64encode(token1)} {base64.b64encode(token2)}\n")
+            f.write(
+                "%s %s\n"
+                % (
+                    base64.b64encode(token1).decode("utf-8"),
+                    base64.b64encode(token2).decode("utf-8"),
+                )
+            )
