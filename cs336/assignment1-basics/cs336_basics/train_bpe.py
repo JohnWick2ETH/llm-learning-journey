@@ -4,12 +4,14 @@ import json
 import regex as re
 import base64
 import time
+import logging
 from concurrent.futures import ProcessPoolExecutor
 from cs336_basics.pretokenization_example import find_chunk_boundaries
 from dataclasses import dataclass
 from collections import Counter
 
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -25,11 +27,12 @@ class MaxHeapLexLargeEntry:
         return (self.frequency, self.pair) > (other.frequency, other.pair)
 
 
-def pre_tokenize(text: bytes, special_tokens):
+def pre_tokenize(text: bytes, special_tokens, worker_id: int):
     """
     returns pre-tokens and their frequency in the text corpus
     """
     text = text.decode("utf-8")  # convert bytes to Unicode string
+    pat_re = re.compile(PAT)
 
     # 1. strip `special_tokens` out from text
     # 2. for each text part, run regex to extract pre-tokens
@@ -39,12 +42,19 @@ def pre_tokenize(text: bytes, special_tokens):
         stripped_text = [text]
     else:
         stripped_text = re.split(strip_pat, text)
+    start_t = time.perf_counter()
     for sub_text in stripped_text:
-        for s in re.finditer(PAT, sub_text):
-            # convert Unicode string to utf-8 encoded bytes (pre-token)
-            bs = s[0].encode("utf-8")
+        for s in pat_re.finditer(sub_text):
+            bs = s[0]
             pre_tokens[bs] = pre_tokens.get(bs, 0) + 1
+    end_t = time.perf_counter()
+    if worker_id == 0:
+        logger.info("pre_tokenize for worker 0 took %.2fs" % (end_t - start_t))
 
+    # convert dict[string,int] to dict[bytes,int]
+    pre_tokens = {
+        pre_token.encode("utf-8"): freq for (pre_token, freq) in pre_tokens.items()
+    }
     return pre_tokens
 
 
@@ -93,6 +103,7 @@ def compute_merges(
     # 3. iteratively pop out the most frequent pair as new merge
     #    and update the pair frequency dict and max heap
     while num_vocabs < vocab_size:
+        start_t = time.perf_counter()
         # pop out the most frequent pair as new merge
         # it's possible that a pair has multiple frequency records
         # in the max-heap, so called "stale" records,
@@ -110,6 +121,8 @@ def compute_merges(
         pair_freq_diffs = {}
 
         # compute new decomposition: replace non-overlapping occurences of [b,c] by [bc]
+        num_related_pre_tokens = len(pair_to_pre_tokens[most_frequent_pair])
+        # TODO: parallelize the below work
         for pre_token_idx in pair_to_pre_tokens[most_frequent_pair]:
             pre_token = pre_tokens[pre_token_idx]
             pre_token_count = pre_tokens_freq[pre_token]
@@ -167,6 +180,11 @@ def compute_merges(
             new_freq = pair_freq.get(pair, 0) + freq_count_diff
             pair_freq[pair] = new_freq
             heapq.heappush(pair_freq_heap, MaxHeapLexLargeEntry(new_freq, pair))
+        end_t = time.perf_counter()
+        logger.info(
+            "get vocab %d which occurs in %d pre-tokens took %.2fs"
+            % (num_vocabs, num_related_pre_tokens, end_t - start_t)
+        )
 
     return merges
 
@@ -175,7 +193,7 @@ def train_bpe(
     input_path: str | os.PathLike,
     vocab_size: int,
     special_tokens: list[str],
-):
+) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
     """
     Train a Byte Pair Encoding (BPE) tokenizer on the input text file.
     The output is (vocab, merges).
@@ -194,14 +212,20 @@ def train_bpe(
             f.seek(start)
             chunk = f.read(end - start)
             chunks.append(chunk)
+        start_t = time.perf_counter()
         with ProcessPoolExecutor(max_workers=os.cpu_count()) as executor:
             st_chunks = [special_tokens] * len(chunks)
-            freqs = list(executor.map(pre_tokenize, chunks, st_chunks))
+            worker_ids = [i for i in range(len(chunks))]
+            freqs = list(executor.map(pre_tokenize, chunks, st_chunks, worker_ids))
             # merge N frequency dictionaries into one
             merged_freq = {}
             for freq in freqs:
                 for pre_token, count in freq.items():
                     merged_freq[pre_token] = merged_freq.get(pre_token, 0) + count
+        end_t = time.perf_counter()
+        logger.info(
+            "pre_tokenize over %d workers in %.2fs" % (len(chunks), end_t - start_t)
+        )
         # compute merges
         merges = compute_merges(merged_freq, vocab_size, len(special_tokens) + 256)
         vocab_list = []
@@ -229,51 +253,10 @@ def store_trained_artifacts(vocab, merges, vocab_path, merges_path):
         )
     with open(merges_path, "w", encoding="utf-8") as f:
         for token1, token2 in merges:
-            f.write(f"{base64.b64encode(token1)} {base64.b64encode(token2)}\n")
-
-
-def train_bpe_tinystories(data_folder):
-    """
-    Train a Byte Pair Encoding (BPE) tokenizer specifically for the TinyStories dataset.
-    """
-    start_time = time.perf_counter()
-    vocab, merges = train_bpe(
-        input_path="%s/TinyStoriesV2-GPT4-train.txt" % data_folder,
-        vocab_size=10000,
-        special_tokens=["<|endoftext|>"],
-    )
-    end_time = time.perf_counter()
-    print(
-        "time to train bpe over TinyStoriesV2-GPT4-train.txt took %.2fs"
-        % (end_time - start_time)
-    )
-
-    store_trained_artifacts(
-        vocab,
-        merges,
-        vocab_path="%s/train-bpe-tinystories-vocab.json" % data_folder,
-        merges_path="%s/train-bpe-tinystories-merges.txt" % data_folder,
-    )
-
-
-def train_bpe_expts_owt(data_folder):
-    """
-    Train a Byte Pair Encoding (BPE) tokenizer specifically for the OpenWebText dataset.
-    """
-    vocab, merges = train_bpe(
-        input_path="%s/owt_train.txt" % data_folder,
-        vocab_size=32000,
-        special_tokens=["<|endoftext|>"],
-    )
-
-    store_trained_artifacts(
-        vocab,
-        merges,
-        vocab_path="%s/train-bpe-owt-vocab.json" % data_folder,
-        merges_path="%s/train-bpe-owt-merges.txt" % data_folder,
-    )
-
-
-if __name__ == "__main__":
-    train_bpe_tinystories(data_folder="../data")
-    # train_bpe_expts_owt(data_folder="../data")
+            f.write(
+                "%s %s\n"
+                % (
+                    base64.b64encode(token1).decode("utf-8"),
+                    base64.b64encode(token2).decode("utf-8"),
+                )
+            )
