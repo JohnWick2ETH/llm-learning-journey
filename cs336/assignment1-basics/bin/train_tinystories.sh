@@ -25,8 +25,21 @@ fi
 
 # 2. encode the input text given the tokenizer from step 1
 #   the output will be a file of tokens for the given input text
+if [ ! -f '../data/tinystories_token.txt' ]; then
+    uv run python token_encoder.py --vocab ../data/tinystories_vocab.json --merges ../data/tinystories_merges.txt \
+        --input ../data/TinyStoriesV2-GPT4-train.txt --output ../data/tinystories_token.txt
+fi
 
-uv run python token_encoder.py --vocab ../data/tinystories_vocab.json --merges ../data/tinystories_merges.txt \
-   --input ../data/TinyStoriesV2-GPT4-train.txt --output ../data/tinystories_token.txt
+# 3. encode the validation text to get validation token
+if [ ! -f '../data/tinystories_valid_token.txt' ]; then
+    uv run python token_encoder.py --vocab ../data/tinystories_vocab.json --merges ../data/tinystories_merges.txt \
+        --input ../data/TinyStoriesV2-GPT4-valid.txt --output ../data/tinystories_valid_token.txt
+fi
 
-# 3. train the transformer based language model
+# 4. train the transformer based language model
+uv run python train_model.py \
+    --tokens ../data/tinystories_valid_token.txt \
+    --valid_tokens ../data/tinystories_valid_token.txt \
+    --model_config ./model_config.json \
+    --vocab_size 10000 \
+    --training_config ./training_config.json 

@@ -26,7 +26,6 @@ def main(
 ):
     tokenizer = BPETokenizer.from_files(vocab_path, merges_path, special_tokens)
 
-    all_ids = []
     num_processes = os.cpu_count()
     with open(corpus_path, "rb") as f:
         chunk_boundaries = find_chunk_boundaries(f, num_processes, b"\n")
@@ -36,15 +35,18 @@ def main(
         for (start, end) in zip(chunk_boundaries[:-1], chunk_boundaries[1:])
     ]
     with ProcessPoolExecutor(max_workers=num_processes) as executor:
-        token_ids = list(executor.map(encode_chunk, chunks))
         # TODO: handle the case corpus is very large (e.g. 500+ GB)
-        for ids in token_ids:
-            all_ids.extend(ids)
+        # it will easily exceed the main memory limit
+        token_ids = executor.map(encode_chunk, chunks)
 
+    num_tokens_per_line = 128
     with open(out_token_path, "w", encoding="utf-8") as f:
-        for id in all_ids:
-            # the output file is just a full line of token id followed by a space
-            f.write("%d " % id)
+        for ids in token_ids:
+            for s in range(0, len(ids), num_tokens_per_line):
+                e = min(s + num_tokens_per_line, len(ids))
+                # the output file is just lines of token ids
+                f.write(" ".join(str(id) for id in ids[s:e]))
+                f.write("\n")
 
 
 if __name__ == "__main__":
