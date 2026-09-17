@@ -1,7 +1,10 @@
 import json
 import regex as re
 from collections.abc import Iterable
-from cs336_basics.train_bpe import pre_tokenize, PAT
+from cs336_basics.train_bpe import PAT
+from base64 import b64decode
+
+pre_program = re.compile(PAT)
 
 
 class BPETokenizer:
@@ -36,7 +39,7 @@ class BPETokenizer:
             serialized_vocab = json.load(f)
 
         vocab = {
-            int(token_id): bytes.fromhex(token)
+            int(token_id): b64decode(token)
             for token, token_id in serialized_vocab.items()
         }
 
@@ -44,7 +47,7 @@ class BPETokenizer:
             merges = []
             for line in f:
                 t = line.rstrip().split(" ")
-                merges.append((bytes.fromhex(t[0]), bytes.fromhex(t[1])))
+                merges.append((b64decode(t[0]), b64decode(t[1])))
 
         return BPETokenizer(vocab, merges, special_tokens)
 
@@ -61,7 +64,7 @@ class BPETokenizer:
             if self.special_tokens != None and sub_text in self.special_tokens:
                 pre_tokens.append((sub_text.encode(), True))
             else:
-                for s in re.finditer(PAT, sub_text):
+                for s in pre_program.finditer(sub_text):
                     # convert Unicode string to utf-8 encoded bytes (pre-token)
                     bs = s[0].encode("utf-8")
                     pre_tokens.append((bs, False))
@@ -78,7 +81,6 @@ class BPETokenizer:
         # 2. for each pre-token, apply the merges in the order they were created
         for pre_token, is_special in pre_tokens:
             if is_special:
-                print(pre_token)
                 token_ids.append(self.vocab_lkt[pre_token])
                 continue
 
@@ -86,7 +88,7 @@ class BPETokenizer:
             pre_token_decomp = [bytes([b]) for b in pre_token]
 
             while True:
-                priority = 0 # 0 is the lowest priority
+                priority = 0  # 0 is the lowest priority
                 # find pair that has highest merge priority
                 for p0, p1 in zip(pre_token_decomp[:-1], pre_token_decomp[1:]):
                     cur = self.merge_priority.get((p0, p1))
