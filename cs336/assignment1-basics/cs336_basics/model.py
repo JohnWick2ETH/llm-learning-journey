@@ -25,7 +25,7 @@ class Linear(nn.Module):
     ):
         super().__init__()
 
-        weight = torch.zeros(out_features, in_features, device=device, dtype=dtype)
+        weight = torch.empty(out_features, in_features, device=device, dtype=dtype)
         sigma = sqrt(2.0 / (in_features + out_features))
         nn.init.trunc_normal_(
             tensor=weight, mean=0.0, std=sigma, a=-3.0 * sigma, b=3.0 * sigma
@@ -57,10 +57,10 @@ class Embedding(nn.Module):
     ):
         super().__init__()
 
-        matrix = torch.zeros(num_embeddings, embedding_dim, device=device, dtype=dtype)
-        nn.init.trunc_normal_(tensor=matrix, mean=0.0, std=1.0, a=-3.0, b=3.0)
+        weight = torch.empty(num_embeddings, embedding_dim, device=device, dtype=dtype)
+        nn.init.trunc_normal_(tensor=weight, mean=0.0, std=1.0, a=-3.0, b=3.0)
 
-        self.weight = nn.Parameter(matrix)
+        self.weight = nn.Parameter(weight)
 
     def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
         """
@@ -82,7 +82,7 @@ class RMSNorm(nn.Module):
         super().__init__()
         self.d_model = d_model
         self.eps = eps
-        # starting at 1 makes per-feature scale initially neural
+        # starting at 1 makes per-feature scale initially neutral
         self.weight = nn.Parameter(torch.ones(d_model, device=device, dtype=dtype))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -213,11 +213,13 @@ class MultiHeadSelfAttention(nn.Module):
             num_heads=self.num_heads,
         )
 
-        casual_mask = torch.tril(torch.ones(seq_len, seq_len, dtype=bool))
+        causal_mask = torch.tril(
+            torch.ones(seq_len, seq_len, device=x.device, dtype=bool)
+        )
         att = SingleHeadSelfAttension()
 
         # the tensor has shape (... num_heads seq_len d_v)
-        heads = att(qi, ki, vi, casual_mask)
+        heads = att(qi, ki, vi, causal_mask)
         heads = rearrange(
             heads, "... num_heads seq_len d_v -> ... seq_len (num_heads d_v)"
         )
@@ -256,14 +258,13 @@ class RotaryPositionalEmbedding(nn.Module):
                 mi.append([[c, -s], [s, c]])
             m.append(mi)
 
-        tensor_m = torch.Tensor(m)
+        tensor_m = torch.Tensor(m).to(device, dtype)
         assert tensor_m.shape[0] == max_seq_len
         assert tensor_m.shape[1] == d_k // 2
         assert tensor_m.shape[2] == 2
         assert tensor_m.shape[3] == 2
 
         self.register_buffer("rotation_matrices", tensor_m, persistent=False)
-        self.device = device
 
     def forward(self, x: torch.Tensor, token_positions: torch.Tensor) -> torch.Tensor:
         """
@@ -285,10 +286,22 @@ class RotaryPositionalEmbedding(nn.Module):
 
 class MultiHeadSelfAttentionWithROPE(MultiHeadSelfAttention):
 
-    def __init__(self, d_model: int, num_heads: int, max_seq_len: int, theta: float):
+    def __init__(
+        self,
+        d_model: int,
+        num_heads: int,
+        max_seq_len: int,
+        theta: float,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ):
         super().__init__(d_model=d_model, num_heads=num_heads)
         self.rope = RotaryPositionalEmbedding(
-            theta=theta, d_k=d_model // num_heads, max_seq_len=max_seq_len
+            theta=theta,
+            d_k=d_model // num_heads,
+            max_seq_len=max_seq_len,
+            device=device,
+            dtype=dtype,
         )
 
     def forward(self, x: torch.Tensor, token_positions: torch.Tensor):
@@ -337,13 +350,20 @@ class TransformerBlock(nn.Module):
         d_ff: int,
         max_seq_len: int,
         theta: float,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
     ):
         super().__init__()
-        self.ln1 = RMSNorm(d_model=d_model)
-        self.ln2 = RMSNorm(d_model=d_model)
-        self.ffn = SwiGLUFeedForwardNetwork(d_model=d_model, d_ff=d_ff)
+        self.ln1 = RMSNorm(d_model, device=device, dtype=dtype)
+        self.ln2 = RMSNorm(d_model, device=device, dtype=dtype)
+        self.ffn = SwiGLUFeedForwardNetwork(d_model, d_ff, device, dtype)
         self.attn = MultiHeadSelfAttentionWithROPE(
-            d_model=d_model, num_heads=num_heads, max_seq_len=max_seq_len, theta=theta
+            d_model=d_model,
+            num_heads=num_heads,
+            max_seq_len=max_seq_len,
+            theta=theta,
+            device=device,
+            dtype=dtype,
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -377,16 +397,23 @@ class TransformerLM(nn.Module):
         num_heads: int,
         d_ff: int,
         rope_theta: float,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
     ):
         super().__init__()
 
         self.vocab_size = vocab_size
         self.num_layers = num_layers
-        self.lm_head = Linear(in_features=d_model, out_features=vocab_size)
-        self.token_embeddings = Embedding(
-            num_embeddings=vocab_size, embedding_dim=d_model
+        self.lm_head = Linear(
+            in_features=d_model, out_features=vocab_size, device=device, dtype=dtype
         )
-        self.ln_final = RMSNorm(d_model=d_model)
+        self.token_embeddings = Embedding(
+            num_embeddings=vocab_size,
+            embedding_dim=d_model,
+            device=device,
+            dtype=dtype,
+        )
+        self.ln_final = RMSNorm(d_model, device=device, dtype=dtype)
         self.layers = nn.ModuleList(
             [
                 TransformerBlock(
@@ -395,6 +422,8 @@ class TransformerLM(nn.Module):
                     d_ff=d_ff,
                     max_seq_len=context_length,
                     theta=rope_theta,
+                    device=device,
+                    dtype=dtype,
                 )
                 for _ in range(num_layers)
             ]
