@@ -79,7 +79,7 @@ def run_embedding(
 
     e = Embedding(vocab_size, d_model)
 
-    e.load_state_dict({"e_matrix": weights})
+    e.load_state_dict({"weight": weights})
 
     return e(token_ids)
 
@@ -108,7 +108,9 @@ def run_swiglu(
     """
     swiglu = SwiGLUFeedForwardNetwork(d_model=d_model, d_ff=d_ff)
 
-    swiglu.load_state_dict({"w1": w1_weight, "w2": w2_weight, "w3": w3_weight})
+    swiglu.load_state_dict(
+        {"w1.weight": w1_weight, "w2.weight": w2_weight, "w3.weight": w3_weight}
+    )
 
     return swiglu(in_features)
 
@@ -172,10 +174,10 @@ def run_multihead_self_attention(
 
     att.load_state_dict(
         {
-            "q_weight": q_proj_weight,
-            "k_weight": k_proj_weight,
-            "v_weight": v_proj_weight,
-            "o_weight": o_proj_weight,
+            "q_proj.weight": q_proj_weight,
+            "k_proj.weight": k_proj_weight,
+            "v_proj.weight": v_proj_weight,
+            "output_proj.weight": o_proj_weight,
         }
     )
 
@@ -225,10 +227,10 @@ def run_multihead_self_attention_with_rope(
 
     att.load_state_dict(
         {
-            "q_weight": q_proj_weight,
-            "k_weight": k_proj_weight,
-            "v_weight": v_proj_weight,
-            "o_weight": o_proj_weight,
+            "q_proj.weight": q_proj_weight,
+            "k_proj.weight": k_proj_weight,
+            "v_proj.weight": v_proj_weight,
+            "output_proj.weight": o_proj_weight,
         }
     )
 
@@ -336,23 +338,7 @@ def run_transformer_block(
         theta=theta,
     )
 
-    block.norm_before_attn.load_state_dict({"weights": weights["ln1.weight"]})
-    block.norm_before_ffn.load_state_dict({"weights": weights["ln2.weight"]})
-    block.ffn.load_state_dict(
-        {
-            "w1": weights["ffn.w1.weight"],
-            "w2": weights["ffn.w2.weight"],
-            "w3": weights["ffn.w3.weight"],
-        }
-    )
-    block.attn.load_state_dict(
-        {
-            "q_weight": weights["attn.q_proj.weight"],
-            "k_weight": weights["attn.k_proj.weight"],
-            "v_weight": weights["attn.v_proj.weight"],
-            "o_weight": weights["attn.output_proj.weight"],
-        }
-    )
+    block.load_state_dict(weights)
 
     return block(in_features)
 
@@ -445,37 +431,7 @@ def run_transformer_lm(
         d_ff=d_ff,
         rope_theta=rope_theta,
     )
-
-    lm.load_state_dict(
-        {
-            "lm_head.weight": weights["lm_head.weight"],
-            "input_embedding.e_matrix": weights["token_embeddings.weight"],
-            "final_norm.weights": weights["ln_final.weight"],
-        }
-    )
-
-    for i in range(num_layers):
-        lm.blocks[i].norm_before_attn.load_state_dict(
-            {"weights": weights["layers.%s.ln1.weight" % i]}
-        )
-        lm.blocks[i].norm_before_ffn.load_state_dict(
-            {"weights": weights["layers.%s.ln2.weight" % i]}
-        )
-        lm.blocks[i].ffn.load_state_dict(
-            {
-                "w1": weights["layers.%s.ffn.w1.weight" % i],
-                "w2": weights["layers.%s.ffn.w2.weight" % i],
-                "w3": weights["layers.%s.ffn.w3.weight" % i],
-            }
-        )
-        lm.blocks[i].attn.load_state_dict(
-            {
-                "q_weight": weights["layers.%s.attn.q_proj.weight" % i],
-                "k_weight": weights["layers.%s.attn.k_proj.weight" % i],
-                "v_weight": weights["layers.%s.attn.v_proj.weight" % i],
-                "o_weight": weights["layers.%s.attn.output_proj.weight" % i],
-            }
-        )
+    lm.load_state_dict(weights)
 
     return lm(in_indices)
 
@@ -503,7 +459,7 @@ def run_rmsnorm(
 
     n = RMSNorm(d_model=d_model, eps=eps)
 
-    n.load_state_dict({"weights": weights})
+    n.load_state_dict({"weight": weights})
     return n(in_features)
 
 
