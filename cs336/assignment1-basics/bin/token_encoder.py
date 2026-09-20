@@ -1,11 +1,12 @@
 import argparse
 import os
+import numpy as np
 from concurrent.futures import ProcessPoolExecutor
 from cs336_basics.tokenizer import BPETokenizer
 from cs336_basics.pretokenization_example import find_chunk_boundaries
 
 
-def encode_chunk(args) -> list[int]:
+def encode_chunk(args) -> np.typing.NDArray[np.uint16]:
     tokenizer, file_path, start, end = args
     with open(file_path, "rb") as f:
         f.seek(start)
@@ -14,7 +15,7 @@ def encode_chunk(args) -> list[int]:
             line = f.readline(end - start).decode("utf-8")
             ids.extend(tokenizer.encode(line))
 
-    return ids
+    return np.array(ids)
 
 
 def main(
@@ -39,14 +40,9 @@ def main(
         # it will easily exceed the main memory limit
         token_ids = executor.map(encode_chunk, chunks)
 
-    num_tokens_per_line = 128
-    with open(out_token_path, "w", encoding="utf-8") as f:
+    with open(out_token_path, "wb") as f:
         for ids in token_ids:
-            for s in range(0, len(ids), num_tokens_per_line):
-                e = min(s + num_tokens_per_line, len(ids))
-                # the output file is just lines of token ids
-                f.write(" ".join(str(id) for id in ids[s:e]))
-                f.write("\n")
+            f.write(ids)
 
 
 if __name__ == "__main__":
