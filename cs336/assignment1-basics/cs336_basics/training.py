@@ -21,11 +21,11 @@ def get_batch(
     inputs = torch.from_numpy(
         np.array([dataset[sj : sj + context_length] for sj in start_pos])
     )
-    inputs.to(device)
+    inputs = inputs.to(device)
     nexts = torch.from_numpy(
         np.array([dataset[sj + 1 : sj + context_length + 1] for sj in start_pos])
     )
-    nexts.to(device)
+    nexts = nexts.to(device)
     return (inputs, nexts)
 
 

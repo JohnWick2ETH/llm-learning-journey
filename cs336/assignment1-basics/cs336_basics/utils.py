@@ -76,7 +76,7 @@ def cross_entropy_loss(logits: torch.Tensor, targets: torch.Tensor) -> torch.Ten
     Returns:
         torch.Tensor: The average cross-entropy loss.
     """
-    (x_adjusted, S) = log_softmax(logits, dim_i=-1)
+    x_adjusted, S = log_softmax(logits, dim_i=-1)
 
     # x[i] - max(x) for i in targets
     target_x = x_adjusted.gather(dim=-1, index=targets.unsqueeze(-1))

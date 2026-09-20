@@ -38,7 +38,7 @@ fi
 
 # 4. train the transformer based language model
 uv run python train_model.py \
-    --tokens ../data/tinystories_valid_token.txt \
+    --tokens ../data/tinystories_token.txt \
     --valid_tokens ../data/tinystories_valid_token.txt \
     --model_config ./model_config.json \
     --vocab_size 10000 \

@@ -1,10 +1,17 @@
 import argparse
 import json
 import numpy as np
+import torch
 from cs336_basics.model import TransformerLM
 from cs336_basics.optimizer import AdamW
 from cs336_basics.training import get_batch
 from cs336_basics.utils import cross_entropy_loss
+
+
+def try_gpu(i=0):
+    if torch.cuda.device_count() >= i + 1:
+        return torch.device(f"cuda:{i}")
+    return torch.device("cpu")
 
 
 def load_token(token_path: str) -> np.typing.NDArray:
@@ -40,6 +47,7 @@ def main(args):
         num_heads=mc["num_heads"],
         d_ff=mc["d_ff"],
         rope_theta=mc["rope_theta"],
+        device=try_gpu(),
     )
 
     # init optimizer
@@ -66,11 +74,11 @@ def main(args):
     for e in range(num_epochs):
         # in each epoch, keep sampling small batches
         num_samples = len(training_set) // (batch_size * context_length)
-        for _ in range(num_samples):
-            optimizer.zero_grad()
+        for i in range(num_samples):
+            optimizer.zero_grad(set_to_none=True)
 
             in_tokens, next_tokens = get_batch(
-                training_set, batch_size, context_length, "cuda:0"
+                training_set, batch_size, context_length, try_gpu()
             )
 
             # run forward pass to get the loss
@@ -81,7 +89,17 @@ def main(args):
             loss.backward()
             optimizer.step()
 
-            # run the updated model on a small validation set
+            with torch.no_grad():
+                # run the updated model on a small validation set
+                valid_in, valid_next = get_batch(
+                    validation_set,
+                    batch_size,
+                    context_length,
+                    try_gpu(),
+                )
+                valid_logits = model(valid_in)
+                valid_loss = cross_entropy_loss(valid_logits, valid_next)
+                print("loss on validation set at sample %d: %s" % (i, valid_loss))
 
     pass
 

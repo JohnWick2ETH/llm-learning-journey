@@ -5,12 +5,6 @@ from .utils import softmax
 from einops import einsum, rearrange
 
 
-def try_gpu(i=0):
-    if torch.cuda.device_count() >= i + 1:
-        return torch.device(f"cuda:{i}")
-    return torch.device("cpu")
-
-
 class Linear(nn.Module):
     """
     returns W*x
@@ -90,8 +84,6 @@ class RMSNorm(nn.Module):
         computes RMS norm for each vector in the input tensor of shape (batch_size, sequence_length, d_model)
         returns a new tensor with same shape as input
         """
-        assert self.weight != None
-
         in_dtype = x.dtype
         x = x.to(torch.float32)
 
@@ -137,7 +129,7 @@ class SwiGLUFeedForwardNetwork(nn.Module):
         return self.w2(y1 * y2)
 
 
-class SingleHeadSelfAttension(nn.Module):
+class Attention(nn.Module):
 
     def __init__(self):
         super().__init__()
@@ -216,7 +208,7 @@ class MultiHeadSelfAttention(nn.Module):
         causal_mask = torch.tril(
             torch.ones(seq_len, seq_len, device=x.device, dtype=bool)
         )
-        att = SingleHeadSelfAttension()
+        att = Attention()
 
         # the tensor has shape (... num_heads seq_len d_v)
         heads = att(qi, ki, vi, causal_mask)
@@ -295,7 +287,7 @@ class MultiHeadSelfAttentionWithROPE(MultiHeadSelfAttention):
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
     ):
-        super().__init__(d_model=d_model, num_heads=num_heads)
+        super().__init__(d_model, num_heads, device, dtype)
         self.rope = RotaryPositionalEmbedding(
             theta=theta,
             d_k=d_model // num_heads,
@@ -316,6 +308,7 @@ class MultiHeadSelfAttentionWithROPE(MultiHeadSelfAttention):
             "... seq_len (num_heads d_k) -> ... num_heads seq_len d_k",
             num_heads=self.num_heads,
         )
+        token_positions.unsqueeze_(1)
         qi = self.rope(qi, token_positions)
         ki = rearrange(
             self.k_proj(x),
@@ -329,11 +322,13 @@ class MultiHeadSelfAttentionWithROPE(MultiHeadSelfAttention):
             num_heads=self.num_heads,
         )
 
-        casual_mask = torch.tril(torch.ones(seq_len, seq_len, dtype=bool))
-        att = SingleHeadSelfAttension()
+        causal_mask = torch.tril(
+            torch.ones(seq_len, seq_len, device=x.device, dtype=bool)
+        )
+        att = Attention()
 
         # the tensor has shape (... num_heads seq_len d_v)
-        heads = att(qi, ki, vi, casual_mask)
+        heads = att(qi, ki, vi, causal_mask)
         heads = rearrange(
             heads, "... num_heads seq_len d_v -> ... seq_len (num_heads d_v)"
         )

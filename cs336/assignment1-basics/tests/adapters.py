@@ -15,7 +15,7 @@ from cs336_basics.model import (
     Embedding,
     RMSNorm,
     SwiGLUFeedForwardNetwork,
-    SingleHeadSelfAttension,
+    Attention,
     MultiHeadSelfAttention,
     RotaryPositionalEmbedding,
     MultiHeadSelfAttentionWithROPE,
@@ -134,7 +134,7 @@ def run_scaled_dot_product_attention(
         Float[Tensor, " ... queries d_v"]: Output of SDPA
     """
 
-    att = SingleHeadSelfAttension()
+    att = Attention()
 
     return att(Q, K, V, mask)
 
