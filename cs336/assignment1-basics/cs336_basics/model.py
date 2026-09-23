@@ -6,6 +6,10 @@ from einops import einsum, rearrange
 
 
 class Linear(nn.Module):
+    """
+    returns W*x
+    """
+
     def __init__(
         self,
         in_features: int,
@@ -15,7 +19,7 @@ class Linear(nn.Module):
     ):
         super().__init__()
 
-        weight = torch.empty(out_features, in_features)
+        weight = torch.empty(out_features, in_features, device=device, dtype=dtype)
         sigma = sqrt(2.0 / (in_features + out_features))
         nn.init.trunc_normal_(
             tensor=weight, mean=0.0, std=sigma, a=-3.0 * sigma, b=3.0 * sigma
@@ -27,10 +31,16 @@ class Linear(nn.Module):
         """
         returns W*x
         """
-        return x @ self.weight.T
+        return einsum(x, self.weight, "... d_in, d_out d_in -> ... d_out")
 
 
 class Embedding(nn.Module):
+    """
+    convert token id to a vector in the vector space of dimension d_model
+    that is, token id is mapped to a vector in R^d_model.
+
+    the embedding matrix/tensor has shape (vocab_size, d_model)
+    """
 
     def __init__(
         self,
@@ -41,18 +51,17 @@ class Embedding(nn.Module):
     ):
         super().__init__()
 
-        matrix = torch.empty(num_embeddings, embedding_dim)
-        nn.init.trunc_normal_(tensor=matrix, mean=0.0, std=1.0, a=-3.0, b=3.0)
+        weight = torch.empty(num_embeddings, embedding_dim, device=device, dtype=dtype)
+        nn.init.trunc_normal_(tensor=weight, mean=0.0, std=1.0, a=-3.0, b=3.0)
 
-        self.e_matrix = nn.Parameter(matrix)
+        self.weight = nn.Parameter(weight)
 
     def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
         """
-        returns embedding vectors for token ids with shape (batch_size, sequence_length)
+        Returns embedding vectors for token id tensor.
+        We assume that the token id tensor has shape (batch_size, sequence_length)
         """
-        # returned tensor has shape (batch_size, sequence_length, d_model)
-
-        return self.e_matrix[token_ids]
+        return self.weight[token_ids]
 
 
 class RMSNorm(nn.Module):
@@ -67,22 +76,21 @@ class RMSNorm(nn.Module):
         super().__init__()
         self.d_model = d_model
         self.eps = eps
-        self.weights = nn.Parameter(torch.empty(d_model))
+        # starting at 1 makes per-feature scale initially neutral
+        self.weight = nn.Parameter(torch.ones(d_model, device=device, dtype=dtype))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         computes RMS norm for each vector in the input tensor of shape (batch_size, sequence_length, d_model)
         returns a new tensor with same shape as input
         """
-        assert self.weights != None
-
         in_dtype = x.dtype
         x = x.to(torch.float32)
 
         # rms is a tensor with shape (batch_size, sequence_length, 1)
         rms = torch.linalg.vector_norm(x, dim=-1, keepdim=True)
 
-        w_aligned = self.weights.reshape(1, 1, x.shape[2])
+        w_aligned = self.weight.reshape(1, 1, x.shape[-1])
 
         f = lambda a, s, g: a * g / torch.sqrt(s * s / self.d_model + self.eps)
 
@@ -104,9 +112,9 @@ class SwiGLUFeedForwardNetwork(nn.Module):
         self.d_model = d_model
         self.d_ff = d_ff
 
-        self.w1 = nn.Parameter(torch.empty(d_ff, d_model))
-        self.w2 = nn.Parameter(torch.empty(d_model, d_ff))
-        self.w3 = nn.Parameter(torch.empty(d_ff, d_model))
+        self.w1 = Linear(d_model, d_ff, device, dtype)
+        self.w2 = Linear(d_ff, d_model, device, dtype)
+        self.w3 = Linear(d_model, d_ff, device, dtype)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -114,13 +122,14 @@ class SwiGLUFeedForwardNetwork(nn.Module):
         """
         silu = lambda x: torch.sigmoid(x) * x
 
-        y1 = silu(x @ self.w1.T)
-        y2 = x @ self.w3.T
+        y0 = self.w1(x)
+        y1 = silu(y0)
+        y2 = self.w3(x)
 
-        return (y1 * y2) @ self.w2.T
+        return self.w2(y1 * y2)
 
 
-class SingleHeadSelfAttension(nn.Module):
+class Attention(nn.Module):
 
     def __init__(self):
         super().__init__()
@@ -152,15 +161,21 @@ class SingleHeadSelfAttension(nn.Module):
 
 class MultiHeadSelfAttention(nn.Module):
 
-    def __init__(self, d_model: int, num_heads: int):
+    def __init__(
+        self,
+        d_model: int,
+        num_heads: int,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ):
         super().__init__()
         self.d_model = d_model
         self.num_heads = num_heads
 
-        self.q_weight = nn.Parameter(torch.empty(d_model, d_model))
-        self.k_weight = nn.Parameter(torch.empty(d_model, d_model))
-        self.v_weight = nn.Parameter(torch.empty(d_model, d_model))
-        self.o_weight = nn.Parameter(torch.empty(d_model, d_model))
+        self.q_proj = Linear(d_model, d_model, device, dtype)
+        self.k_proj = Linear(d_model, d_model, device, dtype)
+        self.v_proj = Linear(d_model, d_model, device, dtype)
+        self.output_proj = Linear(d_model, d_model, device, dtype)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -175,31 +190,33 @@ class MultiHeadSelfAttention(nn.Module):
         # each qi has shape (... seq_len d_k) where d_k = d_model / num_heads
         # TODO: reduce three matrix multiplies to one.
         qi = rearrange(
-            x @ self.q_weight.T,
+            self.q_proj(x),
             "... seq_len (num_heads d_k) -> ... num_heads seq_len d_k",
             num_heads=self.num_heads,
         )
         ki = rearrange(
-            x @ self.k_weight.T,
+            self.k_proj(x),
             "... seq_len (num_heads d_k) -> ... num_heads seq_len d_k",
             num_heads=self.num_heads,
         )
         vi = rearrange(
-            x @ self.v_weight.T,
+            self.v_proj(x),
             "... seq_len (num_heads d_v) -> ... num_heads seq_len d_v",
             num_heads=self.num_heads,
         )
 
-        casual_mask = torch.tril(torch.ones(seq_len, seq_len, dtype=bool))
-        att = SingleHeadSelfAttension()
+        causal_mask = torch.tril(
+            torch.ones(seq_len, seq_len, device=x.device, dtype=bool)
+        )
+        att = Attention()
 
         # the tensor has shape (... num_heads seq_len d_v)
-        heads = att(qi, ki, vi, casual_mask)
+        heads = att(qi, ki, vi, causal_mask)
         heads = rearrange(
             heads, "... num_heads seq_len d_v -> ... seq_len (num_heads d_v)"
         )
 
-        return heads @ self.o_weight.T
+        return self.output_proj(heads)
 
 
 class RotaryPositionalEmbedding(nn.Module):
@@ -210,6 +227,7 @@ class RotaryPositionalEmbedding(nn.Module):
         d_k: int,
         max_seq_len: int,
         device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
     ):
         super().__init__()
         self.theta = theta
@@ -232,14 +250,13 @@ class RotaryPositionalEmbedding(nn.Module):
                 mi.append([[c, -s], [s, c]])
             m.append(mi)
 
-        tensor_m = torch.Tensor(m)
+        tensor_m = torch.Tensor(m).to(device, dtype)
         assert tensor_m.shape[0] == max_seq_len
         assert tensor_m.shape[1] == d_k // 2
         assert tensor_m.shape[2] == 2
         assert tensor_m.shape[3] == 2
 
         self.register_buffer("rotation_matrices", tensor_m, persistent=False)
-        self.device = device
 
     def forward(self, x: torch.Tensor, token_positions: torch.Tensor) -> torch.Tensor:
         """
@@ -261,10 +278,22 @@ class RotaryPositionalEmbedding(nn.Module):
 
 class MultiHeadSelfAttentionWithROPE(MultiHeadSelfAttention):
 
-    def __init__(self, d_model: int, num_heads: int, max_seq_len: int, theta: float):
-        super().__init__(d_model=d_model, num_heads=num_heads)
+    def __init__(
+        self,
+        d_model: int,
+        num_heads: int,
+        max_seq_len: int,
+        theta: float,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ):
+        super().__init__(d_model, num_heads, device, dtype)
         self.rope = RotaryPositionalEmbedding(
-            theta=theta, d_k=d_model // num_heads, max_seq_len=max_seq_len
+            theta=theta,
+            d_k=d_model // num_heads,
+            max_seq_len=max_seq_len,
+            device=device,
+            dtype=dtype,
         )
 
     def forward(self, x: torch.Tensor, token_positions: torch.Tensor):
@@ -275,33 +304,36 @@ class MultiHeadSelfAttentionWithROPE(MultiHeadSelfAttention):
         # each qi has shape (... seq_len d_k) where d_k = d_model / num_heads
         # TODO: reduce three matrix multiplies to one.
         qi = rearrange(
-            x @ self.q_weight.T,
+            self.q_proj(x),
             "... seq_len (num_heads d_k) -> ... num_heads seq_len d_k",
             num_heads=self.num_heads,
         )
+        token_positions.unsqueeze_(1)
         qi = self.rope(qi, token_positions)
         ki = rearrange(
-            x @ self.k_weight.T,
+            self.k_proj(x),
             "... seq_len (num_heads d_k) -> ... num_heads seq_len d_k",
             num_heads=self.num_heads,
         )
         ki = self.rope(ki, token_positions)
         vi = rearrange(
-            x @ self.v_weight.T,
+            self.v_proj(x),
             "... seq_len (num_heads d_v) -> ... num_heads seq_len d_v",
             num_heads=self.num_heads,
         )
 
-        casual_mask = torch.tril(torch.ones(seq_len, seq_len, dtype=bool))
-        att = SingleHeadSelfAttension()
+        causal_mask = torch.tril(
+            torch.ones(seq_len, seq_len, device=x.device, dtype=bool)
+        )
+        att = Attention()
 
         # the tensor has shape (... num_heads seq_len d_v)
-        heads = att(qi, ki, vi, casual_mask)
+        heads = att(qi, ki, vi, causal_mask)
         heads = rearrange(
             heads, "... num_heads seq_len d_v -> ... seq_len (num_heads d_v)"
         )
 
-        return heads @ self.o_weight.T
+        return self.output_proj(heads)
 
 
 class TransformerBlock(nn.Module):
@@ -313,13 +345,20 @@ class TransformerBlock(nn.Module):
         d_ff: int,
         max_seq_len: int,
         theta: float,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
     ):
         super().__init__()
-        self.norm_before_attn = RMSNorm(d_model=d_model)
-        self.norm_before_ffn = RMSNorm(d_model=d_model)
-        self.ffn = SwiGLUFeedForwardNetwork(d_model=d_model, d_ff=d_ff)
+        self.ln1 = RMSNorm(d_model, device=device, dtype=dtype)
+        self.ln2 = RMSNorm(d_model, device=device, dtype=dtype)
+        self.ffn = SwiGLUFeedForwardNetwork(d_model, d_ff, device, dtype)
         self.attn = MultiHeadSelfAttentionWithROPE(
-            d_model=d_model, num_heads=num_heads, max_seq_len=max_seq_len, theta=theta
+            d_model=d_model,
+            num_heads=num_heads,
+            max_seq_len=max_seq_len,
+            theta=theta,
+            device=device,
+            dtype=dtype,
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -332,11 +371,11 @@ class TransformerBlock(nn.Module):
             dtype=torch.long,
         ).expand(*x.shape[:-1])
 
-        t1 = self.norm_before_attn(x)
+        t1 = self.ln1(x)
         t2 = self.attn(t1, token_positions)
         y = x + t2
 
-        t3 = self.norm_before_ffn(y)
+        t3 = self.ln2(y)
         t4 = self.ffn(t3)
         y = y + t4
 
@@ -353,26 +392,37 @@ class TransformerLM(nn.Module):
         num_heads: int,
         d_ff: int,
         rope_theta: float,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
     ):
         super().__init__()
 
         self.vocab_size = vocab_size
         self.num_layers = num_layers
-        self.lm_head = Linear(in_features=d_model, out_features=vocab_size)
-        self.input_embedding = Embedding(
-            num_embeddings=vocab_size, embedding_dim=d_model
+        self.lm_head = Linear(
+            in_features=d_model, out_features=vocab_size, device=device, dtype=dtype
         )
-        self.final_norm = RMSNorm(d_model=d_model)
-        self.blocks = [
-            TransformerBlock(
-                d_model=d_model,
-                num_heads=num_heads,
-                d_ff=d_ff,
-                max_seq_len=context_length,
-                theta=rope_theta,
-            )
-            for _ in range(num_layers)
-        ]
+        self.token_embeddings = Embedding(
+            num_embeddings=vocab_size,
+            embedding_dim=d_model,
+            device=device,
+            dtype=dtype,
+        )
+        self.ln_final = RMSNorm(d_model, device=device, dtype=dtype)
+        self.layers = nn.ModuleList(
+            [
+                TransformerBlock(
+                    d_model=d_model,
+                    num_heads=num_heads,
+                    d_ff=d_ff,
+                    max_seq_len=context_length,
+                    theta=rope_theta,
+                    device=device,
+                    dtype=dtype,
+                )
+                for _ in range(num_layers)
+            ]
+        )
 
     def forward(self, in_tokens: torch.Tensor) -> torch.Tensor:
         """
@@ -382,15 +432,15 @@ class TransformerLM(nn.Module):
         returns a float tensor of shape (batch_size, sequence_length, vocab_size)
         """
         # input embedding
-        x = self.input_embedding(in_tokens)
+        x = self.token_embeddings(in_tokens)
 
         # the result of input embedding is a tensor of shape (batch_size, seq_len, d_model)
         # run `num_layers` transformer blocks iteratively on x
-        for transformer_block in self.blocks:
+        for transformer_block in self.layers:
             x = transformer_block(x)
 
         # final norm
-        y = self.final_norm(x)
+        y = self.ln_final(x)
 
         # output unembedding to get tensor of shape (batch_size, seq_len, vocab_size)
         return self.lm_head(y)
