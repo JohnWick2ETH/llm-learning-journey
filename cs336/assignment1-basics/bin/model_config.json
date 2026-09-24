@@ -1,4 +1,5 @@
 {
+    "vocab_size": 10000,
     "context_length": 256,
     "d_model": 512,
     "d_ff": 1344,

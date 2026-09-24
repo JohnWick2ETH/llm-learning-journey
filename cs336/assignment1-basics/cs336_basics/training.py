@@ -56,6 +56,12 @@ def load_checkpoint(
 
     return checkpoint["iteration"]
 
+def load_model_from_checkpoint(
+    src: str | os.PathLike | typing.BinaryIO | typing.IO[bytes],
+    model: torch.nn.Module,
+):
+    checkpoint = torch.load(src)
+    model.load_state_dict(checkpoint["model"])
 
 @dataclass
 class LMHyperParameter:
