@@ -3,6 +3,12 @@ from math import cos, pi
 import torch
 
 
+def try_gpu(i=0):
+    if torch.cuda.device_count() >= i + 1:
+        return torch.device(f"cuda:{i}")
+    return torch.device("cpu")
+
+
 def lr_cosine_schedule(t: int, alpha_max: float, alpha_min: float, Tw: int, Tc: int):
     if t < Tw:
         return t * alpha_max / Tw

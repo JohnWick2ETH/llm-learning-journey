@@ -15,7 +15,7 @@ def encode_chunk(args) -> np.typing.NDArray[np.uint16]:
             line = f.readline(end - start).decode("utf-8")
             ids.extend(tokenizer.encode(line))
 
-    return np.array(ids)
+    return np.array(ids, dtype=np.uint16)
 
 
 def main(
@@ -42,7 +42,7 @@ def main(
 
     with open(out_token_path, "wb") as f:
         for ids in token_ids:
-            f.write(ids)
+            f.write(ids.tobytes())
 
 
 if __name__ == "__main__":

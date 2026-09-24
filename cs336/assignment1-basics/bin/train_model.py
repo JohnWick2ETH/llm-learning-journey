@@ -5,14 +5,8 @@ import torch
 from cs336_basics.model import TransformerLM
 from cs336_basics.optimizer import AdamW
 from cs336_basics.training import get_batch, load_checkpoint, save_checkpoint
-from cs336_basics.utils import cross_entropy_loss
+from cs336_basics.utils import try_gpu, cross_entropy_loss
 from pathlib import Path
-
-
-def try_gpu(i=0):
-    if torch.cuda.device_count() >= i + 1:
-        return torch.device(f"cuda:{i}")
-    return torch.device("cpu")
 
 
 def main(args):
