@@ -19,8 +19,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  pytest:
-    name: pytest (Python 3.12)
+  benchmark:
+    name: Benchmark (Python 3.12)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     defaults:
@@ -37,8 +37,12 @@ jobs:
           working-directory: cs336/assignment2-systems
           python-version: "3.12"
           enable-cache: true
-          cache-dependency-glob: cs336/assignment2-systems/uv.lock
+          cache-dependency-glob: uv.lock
 
-      - name: Run pytest (train_bpe)
-        run: uv run --frozen python bin/benchmark.py --hyperparam bin/hyperparam.json \
-          --size small --workload forward --warmup_steps 5
+      - name: Run benchmark for 'forward' workload
+        run: |
+          uv run --frozen python bin/benchmark.py \
+          --hyperparam bin/hyperparam.json \
+          --size small \
+          --workload forward \
+          --warmup_steps 5
