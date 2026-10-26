@@ -95,7 +95,7 @@ def main(args):
                 )
                 valid_logits = model(valid_in)
                 valid_loss = cross_entropy_loss(valid_logits, valid_next)
-                print("loss on validation set at %dth step: %s" % (step, valid_loss))
+                print("loss on validation set at [%d/%d]th step: %s" % (step, num_steps, valid_loss))
 
     except KeyboardInterrupt:
         save_checkpoint(model, optimizer, iter_count, args.checkpoint_path)
