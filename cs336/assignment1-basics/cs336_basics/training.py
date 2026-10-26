@@ -5,28 +5,9 @@ import numpy as np
 import torch
 import os
 import typing
-from random import randint
 from .model import TransformerLM
 from .utils import cross_entropy_loss
 from .optimizer import AdamW
-
-
-def get_batch(
-    dataset: np.typing.NDArray, batch_size: int, context_length: int, device: str
-) -> tuple[torch.Tensor, torch.Tensor]:
-    start_pos = [
-        randint(0, len(dataset) - context_length - 1) for _ in range(batch_size)
-    ]
-
-    inputs = torch.from_numpy(
-        np.array([dataset[sj : sj + context_length] for sj in start_pos])
-    )
-    inputs = inputs.to(torch.long).to(device)
-    nexts = torch.from_numpy(
-        np.array([dataset[sj + 1 : sj + context_length + 1] for sj in start_pos])
-    )
-    nexts = nexts.to(torch.long).to(device)
-    return (inputs, nexts)
 
 
 def save_checkpoint(
@@ -56,12 +37,14 @@ def load_checkpoint(
 
     return checkpoint["iteration"]
 
+
 def load_model_from_checkpoint(
     src: str | os.PathLike | typing.BinaryIO | typing.IO[bytes],
     model: torch.nn.Module,
 ):
     checkpoint = torch.load(src)
     model.load_state_dict(checkpoint["model"])
+
 
 @dataclass
 class LMHyperParameter:

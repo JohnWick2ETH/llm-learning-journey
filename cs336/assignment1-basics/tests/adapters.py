@@ -30,7 +30,8 @@ from cs336_basics.utils import (
     gradient_clipping_,
 )
 from cs336_basics.optimizer import AdamW
-from cs336_basics.training import get_batch, save_checkpoint, load_checkpoint
+from cs336_basics.training import save_checkpoint, load_checkpoint
+from cs336_basics.data import get_batch
 
 
 def run_linear(
