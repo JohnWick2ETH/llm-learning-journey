@@ -43,6 +43,7 @@ jobs:
         run: |
           uv run --frozen python bin/benchmark.py \
           --hyperparam bin/hyperparam.json \
-          --size small \
+          --model_size small \
+          --corpus_path ../assignment1-basics/data/tinystories_valid_token.bin \
           --workload forward \
           --warmup_steps 5
