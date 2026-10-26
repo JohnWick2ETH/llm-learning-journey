@@ -32,7 +32,7 @@ def run(workload: str, model, optimizer, input, next):
 
 def main(args):
     if args.device is not None:
-        device = args.device
+        device = torch.device(args.device)
     else:
         device = try_gpu()
 

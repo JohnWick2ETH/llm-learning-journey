@@ -397,6 +397,7 @@ class TransformerLM(nn.Module):
     ):
         super().__init__()
 
+        self.device = device
         self.vocab_size = vocab_size
         self.num_layers = num_layers
         self.lm_head = Linear(
