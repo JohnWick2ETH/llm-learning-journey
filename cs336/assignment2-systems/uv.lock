@@ -134,7 +134,7 @@ wheels = [
 [[package]]
 name = "cs336-basics"
 version = "26.0.4"
-source = { editable = "cs336-basics" }
+source = { editable = "../assignment1-basics" }
 dependencies = [
     { name = "einops" },
     { name = "einx" },

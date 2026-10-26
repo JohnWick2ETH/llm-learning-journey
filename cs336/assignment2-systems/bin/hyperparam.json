@@ -1,0 +1,47 @@
+{
+    "small": {
+        "model": {
+            "d_model": 768, 
+            "num_heads": 12,
+            "num_layers": 12,
+            "d_ff": 3072,
+            "rope_theta": 10000.0
+        }
+    },
+    "medium": {
+        "model": {
+            "d_model": 1024,
+            "num_heads": 16,
+            "num_layers": 24,
+            "d_ff": 4096,
+            "rope_theta": 10000.0
+        }
+    },
+    "large": {
+        "model": {
+            "d_model": 1280,
+            "num_heads": 20,
+            "num_layers": 36,
+            "d_ff": 5120,
+            "rope_theta": 10000.0
+        }
+    },
+    "extra_large": {
+        "model": {
+            "d_model": 1536,
+            "num_heads": 24,
+            "num_layers": 48,
+            "d_ff": 6144,
+            "rope_theta": 10000.0
+        }
+    },
+    "10B": {
+        "model": {
+            "d_model": 4608,
+            "num_heads": 36,
+            "num_layers": 50,
+            "d_ff": 12288,
+            "rope_theta": 10000.0
+        }
+    }
+}

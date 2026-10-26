@@ -4,7 +4,8 @@ import numpy as np
 import torch
 from cs336_basics.model import TransformerLM
 from cs336_basics.optimizer import AdamW
-from cs336_basics.training import get_batch, load_checkpoint, save_checkpoint
+from cs336_basics.training import load_checkpoint, save_checkpoint
+from cs336_basics.data import get_batch
 from cs336_basics.utils import try_gpu, cross_entropy_loss
 from pathlib import Path
 
