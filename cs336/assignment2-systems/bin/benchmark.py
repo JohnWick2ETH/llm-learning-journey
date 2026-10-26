@@ -26,7 +26,8 @@ def run(workload: str, model, optimizer, input, next):
             pass
         case _:
             raise ValueError(f"Unknown workload: {workload}")
-    torch.cuda.synchronize()
+    if model.device.type == 'cuda':
+        torch.cuda.synchronize()
 
 
 def main(args):
