@@ -2,6 +2,7 @@ from argparse import ArgumentParser
 import json
 import timeit
 import numpy as np
+import torch
 from cs336_basics.model import TransformerLM
 from cs336_basics.data import get_batch
 from cs336_basics.utils import try_gpu, cross_entropy_loss
@@ -25,10 +26,15 @@ def run(workload: str, model, optimizer, input, next):
             pass
         case _:
             raise ValueError(f"Unknown workload: {workload}")
+    torch.cuda.synchronize()
 
 
 def main(args):
-    device = try_gpu()
+    if args.device is not None:
+        device = args.device
+    else:
+        device = try_gpu()
+
     # 1. load hyperparameters configuration file
     assert args.model_size in [
         "small",
@@ -82,8 +88,6 @@ def main(args):
     )
     pass
 
-    pass
-
 
 if __name__ == "__main__":
     parser = ArgumentParser(description="Benchmarking transformer model")
@@ -108,6 +112,13 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--warmup_steps", type=int, default=10, help="number of warmup steps"
+    )
+    parser.add_argument(
+        "--device",
+        type=str,
+        required=False,
+        default="cpu",
+        help="device to run benchmark",
     )
 
     args = parser.parse_args()
