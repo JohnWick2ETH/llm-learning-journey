@@ -1,7 +1,7 @@
 import torch
-import einops
 import math
-
+import triton
+import triton.language as tl
 
 class FlashAttentionTorch(torch.autograd.Function):
 
@@ -96,10 +96,110 @@ class FlashAttentionTorch(torch.autograd.Function):
         raise NotImplementedError()
 
 
+@triton.jit
+def flash_attention_fwd_kernel(
+    Q_ptr, K_ptr, V_ptr,
+    O_ptr, L_ptr,
+    stride_qb, stride_qq, stride_qd,
+    stride_kb, stride_kk, stride_kd,
+    stride_vb, stride_vk, stride_vd,
+    stride_ob, stride_oq, stride_od,
+    stride_lb, stride_lq,
+
+    N_QUERIES, N_KEYS,
+    scale,
+    D: tl.constexpr,
+    Q_TILE_SIZE: tl.constexpr,
+    K_TILE_SIZE: tl.constexpr,
+):
+    #########################################################################
+    ####  implement the forward pass of flash attention using Triton kernels
+    #########################################################################
+
+    # Program indices
+    query_tile_index = tl.program_id(0)
+    batch_index = tl.program_id(1)
+
+    q_block_ptr = tl.make_block_ptr(
+        Q_ptr + batch_index * stride_qb,
+        shape=(N_QUERIES, D),
+        strides=(stride_qq, stride_qd),
+        offsets=(query_tile_index * Q_TILE_SIZE, 0),
+        block_shape=(Q_TILE_SIZE, D),
+        order=(1, 0),
+    )
+
+    o_block_ptr = tl.make_block_ptr(
+        O_ptr + batch_index * stride_ob,
+        shape=(N_QUERIES, D),
+        strides=(stride_oq, stride_od),
+        offsets=(query_tile_index * Q_TILE_SIZE, 0),
+        block_shape=(Q_TILE_SIZE, D),
+        order=(1, 0),
+    )
+
+    l_block_ptr = tl.make_block_ptr(
+        L_ptr + batch_index * stride_lb,
+        shape=(N_QUERIES,),
+        strides=(stride_lq,),
+        offsets=(query_tile_index * Q_TILE_SIZE,),
+        block_shape=(Q_TILE_SIZE,),
+        order=(0,),
+    )
+
+    k_block_ptr = tl.make_block_ptr(
+        K_ptr + batch_index * stride_kb,
+        shape=(N_KEYS, D),
+        strides=(stride_kk, stride_kd),
+        offsets=(0, 0),
+        block_shape=(K_TILE_SIZE, D),
+        order=(1, 0),
+    )
+
+    v_block_ptr = tl.make_block_ptr(
+        V_ptr + batch_index * stride_vb,
+        shape=(N_KEYS, D),
+        strides=(stride_vk, stride_vd),
+        offsets=(0, 0),
+        block_shape=(K_TILE_SIZE, D),
+        order=(1, 0),
+    )
+
+    # m, l, o
+    q = tl.load(q_block_ptr, boundary_check=(0, 1), padding_option="zero")
+
+    for i in range(tl.cdiv(D, K_TILE_SIZE)):
+        # load k, v
+        k = tl.load(k_block_ptr, boundary_check=(0, 1), padding_option="zero")
+        v = tl.load(v_block_ptr, boundary_check=(0, 1), padding_option="zero")
+
+        # compute local attention score matrix: Sij = q * ki^T / sqrt(d) of size O(TILE_SIZE^2)
+        attn_score = tl.dot(q, k, trans_b=True) 
+
+        # compute Mi' = max(Mi, row_max(Sij))
+
+        # adjusted_exp_sij = exp(Sij - Mi')
+        # alpha = exp(Mi - Mi')
+
+        # L' = alpha * L + row_sum(adjusted_exp_sij)
+
+        # O' = alpha * O + adjusted_exp_sij * vj
+
+        # advance k_block
+        k_block_ptr = tl.advance(k_block_ptr, (K_TILE_SIZE, 0))
+        v_block_ptr = tl.advance(v_block_ptr, (K_TILE_SIZE, 0))
+    pass
+
 class FlashAttentionTriton(torch.autograd.Function):
     @staticmethod
     def forward(ctx, q, k, v, is_causal):
         # implement the forward pass of flash attention using Triton kernels
+
+        assert len(q.shape) == 3
+        assert len(k.shape) == 3
+        assert len(v.shape) == 3
+
+        D, N_QUERIES, N_KEYS = q.shape[-1], q.shape[-2], k.shape[-2]
         pass
 
     @staticmethod
