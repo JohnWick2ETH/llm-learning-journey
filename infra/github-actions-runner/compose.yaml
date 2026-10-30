@@ -1,0 +1,28 @@
+name: cs336-github-runner
+
+services:
+  runner:
+    build:
+      context: .
+    container_name: cs336-gpu-runner
+    hostname: cs336-gpu-runner
+    restart: unless-stopped
+    init: true
+    gpus: all
+    shm_size: 8gb
+    environment:
+      RUNNER_URL: ${RUNNER_URL:-https://github.com/JohnWick2ETH/llm-learning-journey}
+      RUNNER_TOKEN: ${RUNNER_TOKEN:-}
+      RUNNER_NAME: ${RUNNER_NAME:-cs336-gpu-runner}
+      RUNNER_LABELS: gpu,triton
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - runner-data:/home/runner/actions-runner
+      - runner-work:/home/runner/_work
+
+volumes:
+  runner-data:
+  runner-work:
