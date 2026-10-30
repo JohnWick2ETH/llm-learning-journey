@@ -3,6 +3,7 @@ import math
 import triton
 import triton.language as tl
 
+
 class FlashAttentionTorch(torch.autograd.Function):
 
     @staticmethod
@@ -19,12 +20,8 @@ class FlashAttentionTorch(torch.autograd.Function):
         num_q_tiles = (q.shape[-2] + tile_size - 1) // tile_size
         num_k_tiles = (k.shape[-2] + tile_size - 1) // tile_size
 
-        Out = torch.empty(
-            (q.shape[0], q.shape[1], v.shape[-1]), device=q.device, dtype=v.dtype
-        )
-        Logsumexp = torch.empty(
-            (q.shape[0], q.shape[1]), device=q.device, dtype=v.dtype
-        )
+        Out = torch.empty((q.shape[0], q.shape[1], v.shape[-1]), device=q.device, dtype=v.dtype)
+        Logsumexp = torch.empty((q.shape[0], q.shape[1]), device=q.device, dtype=v.dtype)
 
         for i in range(num_q_tiles):
             q_start = i * tile_size
@@ -34,18 +31,11 @@ class FlashAttentionTorch(torch.autograd.Function):
 
             # init Mi = -inf, Li = 0, and Oi = 0 for each tile
             m = torch.full(
-                (q.shape[0], q_end - q_start),
-                float("-inf"),
-                device=q.device,
-                dtype=q.dtype,
+                (q.shape[0], q_end - q_start), float("-inf"), device=q.device, dtype=q.dtype
             )
-            l = torch.zeros(
-                (q.shape[0], q_end - q_start), device=q.device, dtype=q.dtype
-            )
+            l = torch.zeros((q.shape[0], q_end - q_start), device=q.device, dtype=q.dtype)
             o = torch.zeros(
-                (q.shape[0], q_end - q_start, v.shape[-1]),
-                device=q.device,
-                dtype=v.dtype,
+                (q.shape[0], q_end - q_start, v.shape[-1]), device=q.device, dtype=v.dtype
             )
 
             for j in range(num_k_tiles):
@@ -96,21 +86,21 @@ class FlashAttentionTorch(torch.autograd.Function):
         raise NotImplementedError()
 
 
+# TODO: handle causal attention
 @triton.jit
 def flash_attention_fwd_kernel(
-    Q_ptr, K_ptr, V_ptr,
-    O_ptr, L_ptr,
+    # fmt: off
+    Q_ptr, K_ptr, V_ptr, O_ptr, L_ptr,
     stride_qb, stride_qq, stride_qd,
     stride_kb, stride_kk, stride_kd,
     stride_vb, stride_vk, stride_vd,
     stride_ob, stride_oq, stride_od,
     stride_lb, stride_lq,
-
-    N_QUERIES, N_KEYS,
-    scale,
+    N_QUERIES, N_KEYS, scale,
     D: tl.constexpr,
     Q_TILE_SIZE: tl.constexpr,
     K_TILE_SIZE: tl.constexpr,
+    # fmt: on
 ):
     #########################################################################
     ####  implement the forward pass of flash attention using Triton kernels
@@ -120,7 +110,7 @@ def flash_attention_fwd_kernel(
     query_tile_index = tl.program_id(0)
     batch_index = tl.program_id(1)
 
-    q_block_ptr = tl.make_block_ptr(
+    Q_block_ptr = tl.make_block_ptr(
         Q_ptr + batch_index * stride_qb,
         shape=(N_QUERIES, D),
         strides=(stride_qq, stride_qd),
@@ -129,7 +119,7 @@ def flash_attention_fwd_kernel(
         order=(1, 0),
     )
 
-    o_block_ptr = tl.make_block_ptr(
+    O_block_ptr = tl.make_block_ptr(
         O_ptr + batch_index * stride_ob,
         shape=(N_QUERIES, D),
         strides=(stride_oq, stride_od),
@@ -138,7 +128,7 @@ def flash_attention_fwd_kernel(
         order=(1, 0),
     )
 
-    l_block_ptr = tl.make_block_ptr(
+    L_block_ptr = tl.make_block_ptr(
         L_ptr + batch_index * stride_lb,
         shape=(N_QUERIES,),
         strides=(stride_lq,),
@@ -147,7 +137,7 @@ def flash_attention_fwd_kernel(
         order=(0,),
     )
 
-    k_block_ptr = tl.make_block_ptr(
+    K_block_ptr = tl.make_block_ptr(
         K_ptr + batch_index * stride_kb,
         shape=(N_KEYS, D),
         strides=(stride_kk, stride_kd),
@@ -156,7 +146,7 @@ def flash_attention_fwd_kernel(
         order=(1, 0),
     )
 
-    v_block_ptr = tl.make_block_ptr(
+    V_block_ptr = tl.make_block_ptr(
         V_ptr + batch_index * stride_vb,
         shape=(N_KEYS, D),
         strides=(stride_vk, stride_vd),
@@ -165,43 +155,105 @@ def flash_attention_fwd_kernel(
         order=(1, 0),
     )
 
-    # m, l, o
-    q = tl.load(q_block_ptr, boundary_check=(0, 1), padding_option="zero")
+    q = tl.load(Q_block_ptr, boundary_check=(0, 1), padding_option="zero")
+    m = tl.full((Q_TILE_SIZE,), float("-inf"), dtype=tl.float32)
+    l = tl.zeros((Q_TILE_SIZE,), dtype=tl.float32)
+    o = tl.zeros((Q_TILE_SIZE, D), dtype=tl.float32)
 
-    for i in range(tl.cdiv(D, K_TILE_SIZE)):
+    for i in range(tl.cdiv(N_KEYS, K_TILE_SIZE)):
+        k_start = i * K_TILE_SIZE
         # load k, v
-        k = tl.load(k_block_ptr, boundary_check=(0, 1), padding_option="zero")
-        v = tl.load(v_block_ptr, boundary_check=(0, 1), padding_option="zero")
+        k = tl.load(K_block_ptr, boundary_check=(0, 1), padding_option="zero")
+        v = tl.load(V_block_ptr, boundary_check=(0, 1), padding_option="zero")
 
         # compute local attention score matrix: Sij = q * ki^T / sqrt(d) of size O(TILE_SIZE^2)
-        attn_score = tl.dot(q, k, trans_b=True) 
+        attn_score = tl.dot(q, tl.trans(k), out_dtype=tl.float32) * scale
+
+        # handle the case that final tile has less rows than K_TILE_SIZE
+        k_offsets = k_start + tl.arange(0, K_TILE_SIZE)
+        valid_k = k_offsets < N_KEYS
+        attn_score = tl.where(valid_k[None, :], attn_score, float("-inf"))
 
         # compute Mi' = max(Mi, row_max(Sij))
+        m_new = tl.maximum(m, tl.max(attn_score, axis=1))
 
         # adjusted_exp_sij = exp(Sij - Mi')
+        adjusted_exp_s = tl.exp(attn_score - m_new[:, None])
+
         # alpha = exp(Mi - Mi')
+        alpha = tl.exp(m - m_new)
 
         # L' = alpha * L + row_sum(adjusted_exp_sij)
+        l = alpha * l + tl.sum(adjusted_exp_s, axis=1)
 
         # O' = alpha * O + adjusted_exp_sij * vj
+        p = adjusted_exp_s.to(v.dtype)
+        o = alpha[:, None] * o + tl.dot(p, v, out_dtype=tl.float32)
 
         # advance k_block
-        k_block_ptr = tl.advance(k_block_ptr, (K_TILE_SIZE, 0))
-        v_block_ptr = tl.advance(v_block_ptr, (K_TILE_SIZE, 0))
+        K_block_ptr = tl.advance(K_block_ptr, (K_TILE_SIZE, 0))
+        V_block_ptr = tl.advance(V_block_ptr, (K_TILE_SIZE, 0))
+
+        m = m_new
+
+    # 2. Oi = diag(Li)^{-1} * Oi and write it to output tensor's memory
+    o = o / l[:, None]
+    final_l = tl.log(l) + m
+
+    tl.store(L_block_ptr, final_l, boundary_check=(0,))
+    tl.store(O_block_ptr, o, boundary_check=(0, 1))
     pass
+
 
 class FlashAttentionTriton(torch.autograd.Function):
     @staticmethod
     def forward(ctx, q, k, v, is_causal):
-        # implement the forward pass of flash attention using Triton kernels
+        #######################################################################
+        #### implement the forward pass of flash attention using Triton kernels
+        #######################################################################
 
-        assert len(q.shape) == 3
-        assert len(k.shape) == 3
-        assert len(v.shape) == 3
+        if is_causal:
+            # TODO: handle is_causal = True
+            raise NotImplementedError()
+
+        # assumes q, k, v of shape (b, n, d)
+        assert len(q.shape) == len(k.shape) == len(v.shape) == 3
+        assert q.shape[0] == k.shape[0] == v.shape[0]
+        assert q.shape[-1] == k.shape[-1] == v.shape[-1]
+        assert k.shape[-2] == v.shape[-2]
+        assert q.device == k.device == v.device
+        assert q.is_cuda, "Expected CUDA Tensors"
+        assert q.dtype == k.dtype == v.dtype
+        assert q.dtype in (torch.float16, torch.bfloat16, torch.float32)
 
         D, N_QUERIES, N_KEYS = q.shape[-1], q.shape[-2], k.shape[-2]
-        pass
+        assert N_QUERIES > 0 and N_KEYS > 0 and D > 0
+
+        Out = torch.empty_like(q)
+        Logsumexp = torch.empty(q.shape[:-1], device=q.device, dtype=torch.float32)
+
+        # TODO: make this configurable
+        ctx.Q_TILE_SIZE = 16
+        ctx.K_TILE_SIZE = 16
+
+        flash_attention_fwd_kernel[(triton.cdiv(N_QUERIES, ctx.Q_TILE_SIZE), q.shape[0])](
+            # fmt: off
+            q, k, v, Out, Logsumexp,
+            q.stride(0), q.stride(1), q.stride(2),
+            k.stride(0), k.stride(1), k.stride(2),
+            v.stride(0), v.stride(1), v.stride(2),
+            Out.stride(0), Out.stride(1), Out.stride(2),
+            Logsumexp.stride(0), Logsumexp.stride(1),
+            N_QUERIES, N_KEYS, 1 / math.sqrt(D), D,
+            Q_TILE_SIZE=ctx.Q_TILE_SIZE,
+            K_TILE_SIZE=ctx.K_TILE_SIZE,
+            # fmt: on
+        )
+
+        ctx.save_for_backward(q, k, v, Out, Logsumexp)
+
+        return Out
 
     @staticmethod
     def backward(ctx, grad_output):
-        pass
+        raise NotImplementedError()
