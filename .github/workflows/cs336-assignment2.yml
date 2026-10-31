@@ -23,7 +23,9 @@ concurrency:
 jobs:
   pytest:
     name: pytest (Python 3.12)
-    runs-on: ubuntu-latest
+    # Same-repository branches are trusted; fork PRs must not reach this runner.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, linux, x64, gpu]
     timeout-minutes: 30
     defaults:
       run:
@@ -40,6 +42,19 @@ jobs:
           python-version: "3.12"
           enable-cache: true
           cache-dependency-glob: uv.lock
+
+      - name: Verify CUDA and GPU availability
+        run: |
+          nvidia-smi
+          uv run --frozen python - <<'PY'
+          import torch
+
+          assert torch.cuda.is_available(), "PyTorch cannot access CUDA"
+          assert torch.cuda.device_count() > 0, "No CUDA GPUs are visible"
+          print(f"PyTorch: {torch.__version__}")
+          print(f"CUDA: {torch.version.cuda}")
+          print(f"GPU: {torch.cuda.get_device_name(0)}")
+          PY
 
       - name: Run pytest (flash attention)
         run: uv run --frozen pytest tests/test_attention.py 
