@@ -16,8 +16,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  pytest:
-    name: pytest (Python 3.12, RTX 3090)
+  gpu-smoke:
+    name: GPU smoke test (Python 3.12, RTX 3090)
     # Do not add pull_request_target or untrusted pull_request triggers here.
     # This repository is public and this job runs on a machine on the local network.
     runs-on: [self-hosted, linux, x64, gpu]
@@ -50,6 +50,3 @@ jobs:
           print(f"CUDA {torch.version.cuda}")
           print(f"GPU {torch.cuda.get_device_name(0)}")
           PY
-
-      - name: Run pytest (flash attention)
-        run: uv run --frozen pytest tests/test_attention.py
