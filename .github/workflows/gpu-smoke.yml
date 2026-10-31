@@ -1,0 +1,38 @@
+name: GPU Smoke Test
+
+on:
+  push:
+    paths:
+      - ".github/workflows/gpu-smoke.yml"
+      - "infra/github-actions-runner/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gpu-smoke-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gpu-smoke:
+    name: NVIDIA GPU available
+    # Do not add pull_request_target or untrusted pull_request triggers here.
+    # This repository is public and this job runs on a machine on the local network.
+    runs-on: [self-hosted, linux, x64, gpu]
+    timeout-minutes: 5
+
+    steps:
+      - name: Verify NVIDIA GPU
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -c /dev/nvidiactl
+          nvidia-smi
+
+          gpu_count=$(nvidia-smi --query-gpu=index --format=csv,noheader | wc -l)
+          test "${gpu_count}" -gt 0
+          echo "Detected ${gpu_count} NVIDIA GPU(s)"
+          nvidia-smi \
+            --query-gpu=index,name,driver_version,memory.total \
+            --format=csv,noheader
