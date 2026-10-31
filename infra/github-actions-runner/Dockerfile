@@ -7,6 +7,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update \
     && apt-get install --no-install-recommends -y \
+        build-essential \
         ca-certificates \
         curl \
         git \
@@ -15,6 +16,7 @@ RUN apt-get update \
         libicu74 \
         libssl3 \
         python3 \
+        python3-dev \
         python3-venv \
         zlib1g \
     && rm -rf /var/lib/apt/lists/* \
