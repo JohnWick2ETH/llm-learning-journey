@@ -100,6 +100,7 @@ def flash_attention_fwd_kernel(
     D: tl.constexpr,
     Q_TILE_SIZE: tl.constexpr,
     K_TILE_SIZE: tl.constexpr,
+    is_causal: tl.constexpr,
     # fmt: on
 ):
     #########################################################################
@@ -160,6 +161,8 @@ def flash_attention_fwd_kernel(
     l = tl.zeros((Q_TILE_SIZE,), dtype=tl.float32)
     o = tl.zeros((Q_TILE_SIZE, D), dtype=tl.float32)
 
+    q_offsets = query_tile_index * Q_TILE_SIZE + tl.arange(0, Q_TILE_SIZE)
+
     for i in range(tl.cdiv(N_KEYS, K_TILE_SIZE)):
         k_start = i * K_TILE_SIZE
         # load k, v
@@ -169,10 +172,14 @@ def flash_attention_fwd_kernel(
         # compute local attention score matrix: Sij = q * ki^T / sqrt(d) of size O(TILE_SIZE^2)
         attn_score = tl.dot(q, tl.trans(k), out_dtype=tl.float32) * scale
 
-        # handle the case that final tile has less rows than K_TILE_SIZE
+        # for causal masking, valid k indices are those that are less than N_KEYS
+        # and less than or equal to the current query index (q_offsets)
         k_offsets = k_start + tl.arange(0, K_TILE_SIZE)
-        valid_k = k_offsets < N_KEYS
-        attn_score = tl.where(valid_k[None, :], attn_score, float("-inf"))
+        if is_causal:
+            valid_k = (k_offsets[None, :] < N_KEYS) & (k_offsets[None, :] <= q_offsets[:, None])
+        else:
+            valid_k = k_offsets[None, :] < N_KEYS
+        attn_score = tl.where(valid_k, attn_score, float("-inf"))
 
         # compute Mi' = max(Mi, row_max(Sij))
         m_new = tl.maximum(m, tl.max(attn_score, axis=1))
@@ -202,7 +209,6 @@ def flash_attention_fwd_kernel(
 
     tl.store(L_block_ptr, final_l, boundary_check=(0,))
     tl.store(O_block_ptr, o, boundary_check=(0, 1))
-    pass
 
 
 class FlashAttentionTriton(torch.autograd.Function):
@@ -211,10 +217,6 @@ class FlashAttentionTriton(torch.autograd.Function):
         #######################################################################
         #### implement the forward pass of flash attention using Triton kernels
         #######################################################################
-
-        if is_causal:
-            # TODO: handle is_causal = True
-            raise NotImplementedError()
 
         # assumes q, k, v of shape (b, n, d)
         assert len(q.shape) == len(k.shape) == len(v.shape) == 3
@@ -247,6 +249,7 @@ class FlashAttentionTriton(torch.autograd.Function):
             N_QUERIES, N_KEYS, 1 / math.sqrt(D), D,
             Q_TILE_SIZE=ctx.Q_TILE_SIZE,
             K_TILE_SIZE=ctx.K_TILE_SIZE,
+            is_causal=is_causal,
             # fmt: on
         )
 
